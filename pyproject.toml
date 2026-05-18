@@ -38,8 +38,8 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/<your-username>/visa-mcp"
-Issues = "https://github.com/<your-username>/visa-mcp/issues"
+Homepage = "https://github.com/TECTOS-JP/visa-mcp"
+Issues = "https://github.com/TECTOS-JP/visa-mcp/issues"
 
 [project.scripts]
 visa-mcp = "visa_mcp.server:main"
