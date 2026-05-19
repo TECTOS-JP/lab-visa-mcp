@@ -7,6 +7,8 @@
 
 LLM（Claude Code / Claude Desktop など MCP 対応クライアント）から、SCPI 計測器と非 SCPI 計測器の両方を統一的に操作できるサーバーです。マニュアルから抽出したコマンドを YAML で定義すれば、機器固有の知識なしに自然言語で計測を自動化できます。
 
+📝 **背景・設計思想・実機検証の詳細**: [Note 記事「Claude から計測器を動かす ── visa-mcp の設計と実機検証」](https://note.com/kkondou_tectos/n/n3fba2f27c31c)
+
 ## 特徴
 
 - 🔌 **VISA 経由のあらゆるインタフェース対応**: GPIB / USB / RS-232C / LAN (VXI-11, HiSLIP)
