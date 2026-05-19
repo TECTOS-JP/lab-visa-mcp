@@ -18,6 +18,12 @@ class InstrumentSession:
     idn_parsed: dict
     definition: InstrumentDefinition | None
     identified_at: datetime = field(default_factory=datetime.now)
+    # v0.2.0: 安全制約の前提条件チェック用にコマンド実行履歴を保持
+    command_history: list[str] = field(default_factory=list)
+
+    def record_command(self, command_name: str) -> None:
+        """成功したコマンド名を履歴に追加 (preconditions チェック用)"""
+        self.command_history.append(command_name)
 
     def to_dict(self) -> dict:
         return {

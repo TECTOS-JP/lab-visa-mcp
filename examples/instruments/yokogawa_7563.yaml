@@ -14,6 +14,7 @@ metadata:
   model: "7563"
   description: "6桁デジタルマルチ温度計（DCV/抵抗/RTD/熱電対）"
   manual_ref: "IM7563-01.jp.pdf"
+  category: "multimeter"
 
 identification:
   # この機器は *IDN? 非対応。identify_instrument では識別不可。
@@ -32,6 +33,94 @@ connection:
     data_bits: 8
     parity: "N"
     stop_bits: 1
+
+# ===== 機器仕様 (v0.2.0) =====
+specifications:
+  measurement:
+    display_digits: 6
+    functions:
+      DCV:
+        function_code: "F1"
+        ranges_v: [0.2, 2.0, 20.0, 200.0]
+      OHM_2W:
+        function_code: "F3"
+        ranges_ohm: [200, 2000, 20000, 200000, 2000000, 20000000]
+      OHM_4W:
+        function_code: "F4"
+        ranges_ohm: [200, 2000, 20000, 200000, 2000000, 20000000]
+        notes: "微小抵抗・配線抵抗を排除する場合に推奨"
+      Thermocouple:
+        function_code: "F12"
+        types: ["R", "T", "K", "E", "J", "S", "B", "N", "KpvsAu7Fe", "J263*B"]
+  integration_time:
+    options: ["2.5ms", "16.66ms", "20ms", "100ms", "200ms", "500ms"]
+
+# ===== 安全制約 (v0.2.0) =====
+safety:
+  ratings:
+    input_voltage_dcv:
+      rated: 200.0
+      absolute_max: 220.0
+      recommended_max: 200.0
+      unit: "V"
+      description: "DCV ファンクション時の最大入力電圧"
+    function:
+      rated: 12
+      absolute_max: 12
+      absolute_min: 1
+      unit: ""
+      description: "ファンクションコードの有効範囲 (1=DCV, 3=OHM2W, 4=OHM4W, 9=RTD2W, 10=RTD3W, 11=RTD4W, 12=TC)"
+    integration_time:
+      rated: 6
+      absolute_max: 6
+      absolute_min: 1
+      unit: ""
+      description: "積分時間コード (1=2.5ms, 6=500ms)"
+    averaging_count:
+      rated: 100
+      absolute_max: 100
+      absolute_min: 2
+      unit: ""
+
+  preconditions: []   # 順序依存制約は特になし
+
+  cautions:
+    - "DCV 200V レンジ使用時、入力電圧 200V を超えないこと"
+    - "抵抗測定時は被測定回路の電源を OFF にしてから接続すること"
+    - "熱電対測定では基準接点補償モードを必ず設定 (RM0=内部 / RM1=外部)"
+    - "校正モード (リアパネルスイッチ) は通常使用時に切り替えないこと"
+    - "EEPROM クリア (initialize_eeprom, RC) は数秒間プロセスがブロックされる"
+
+  hardware_protections:
+    - name: "Burnout detection"
+      description: "熱電対の断線検出 (BS1 で有効化)"
+      related_command: "set_burnout_detection"
+    - name: "Range over indication"
+      description: "オーバレンジ時にステータスバイトでフラグが立つ"
+
+# ===== 応答フォーマット (v0.2.0) =====
+response_formats:
+  measurement_data:
+    pattern: '^(?P<status>[NFOTBC])(?P<func>[NTRKEJSB])(?P<tc_type>[KCFVA])(?P<unit>[CFKVNA])(?P<value>[+-]\d+\.\d+E[+-]\d+)\s*$'
+    description: |
+      Yokogawa 7563 独自の測定データ応答形式。
+      例: NTKC+00027.2E+0
+        N=Normal (status), T=Temperature (func),
+        K=K type TC, C=Celsius (unit),
+        +00027.2E+0 = 27.2℃
+    fields:
+      status:
+        N: "Normal"
+        O: "Over range"
+        F: "Failure (burnout 等)"
+        T: "Trigger waiting"
+        B: "Burnout detected"
+      unit:
+        C: "celsius"
+        F: "fahrenheit"
+        K: "kelvin"
+        V: "volt"
+        N: "none / unitless"
 
 commands:
 

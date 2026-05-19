@@ -12,8 +12,7 @@ metadata:
   model: "PMX35-3A"
   description: "直流安定化電源 PMX-Aシリーズ 35V/3A 単出力"
   manual_ref: "PMX_IF_J6.pdf, PMX_V2_J8.pdf"
-  rated_voltage_v: 35.0
-  rated_current_a: 3.0
+  category: "power_supply"
 
 identification:
   # *IDN? 応答例: "KIKUSUI,PMX35-3A,XX123456,IFC01.20.0048 SYS01.41 ..."
@@ -24,6 +23,90 @@ connection:
   default_timeout_ms: 3000
   read_termination: "\n"
   write_termination: "\n"
+
+# ===== 機器仕様 (v0.2.0) =====
+specifications:
+  outputs:
+    - name: "DC Output (single channel)"
+      voltage_range: { min: 0, max: 35.0, unit: "V" }
+      current_range: { min: 0, max: 3.0, unit: "A" }
+      voltage_resolution: 0.001
+      current_resolution: 0.0001
+      ripple_noise: "5 mVp-p typical"
+      load_regulation: "0.01% + 2mV"
+      line_regulation: "0.01% + 2mV"
+  measurement:
+    voltage_accuracy: "±(0.05% of reading + 5 mV)"
+    current_accuracy: "±(0.1% of reading + 5 mA)"
+
+# ===== 安全制約 (v0.2.0) =====
+safety:
+  ratings:
+    voltage:
+      rated: 35.0
+      absolute_max: 36.75      # 定格 105%
+      recommended_max: 35.0
+      absolute_min: 0
+      unit: "V"
+      description: "出力電圧の絶対最大定格"
+    current:
+      rated: 3.0
+      absolute_max: 3.15       # 定格 105%
+      recommended_max: 3.0
+      absolute_min: 0
+      unit: "A"
+      description: "出力電流の絶対最大定格"
+    voltage_protection:
+      rated: 38.5
+      absolute_max: 38.5       # OVP 設定の絶対上限 (定格 110%)
+      absolute_min: 3.5        # OVP 設定の絶対下限 (定格 10%)
+      unit: "V"
+      description: "OVP 動作点の設定可能範囲"
+    current_protection:
+      rated: 3.3
+      absolute_max: 3.3        # OCP 設定の絶対上限 (定格 110%)
+      absolute_min: 0.3        # OCP 設定の絶対下限 (定格 10%)
+      unit: "A"
+      description: "OCP 動作点の設定可能範囲"
+
+  # 出力 ON 前に保護設定を促す
+  preconditions:
+    - command: "set_output"
+      when: { state: ["ON", "1"] }
+      requires:
+        - { has_been_called: "set_voltage_protection" }
+        - { has_been_called: "set_current_protection" }
+      severity: "medium"
+      reason: "出力 ON 前に過電圧保護 (OVP) と過電流保護 (OCP) を設定することを推奨します"
+
+  cautions:
+    - "出力端子を短絡しないこと"
+    - "誘導性負荷 (リレー・モータ等) は OUTP OFF で急遮断せず、徐々に電流を下げること"
+    - "並列接続は不可。直列接続のみ可能"
+    - "外部から逆電圧を印加しないこと"
+
+  hardware_protections:
+    - name: "OVP (Over Voltage Protection)"
+      description: "VOLT:PROT で設定。設定値超過時に出力遮断"
+      related_command: "set_voltage_protection"
+    - name: "OCP (Over Current Protection)"
+      description: "CURR:PROT で設定。設定値超過時に出力遮断"
+      related_command: "set_current_protection"
+    - name: "OTP (Over Temperature Protection)"
+      description: "機器内部温度上昇時の自動遮断 (常時有効)"
+    - name: "Reverse polarity protection"
+      description: "逆電圧入力時の保護 (機器内部回路)"
+
+# ===== 応答フォーマット (v0.2.0) =====
+response_formats:
+  numeric_nr3:
+    pattern: '^(?P<value>[+-]\d+\.\d+E[+-]\d+)$'
+    description: "NR3 形式 (科学表記)。例: +5.00000E+00 = 5.0"
+    fields: {}
+  error_response:
+    pattern: '^(?P<code>[+-]?\d+),"(?P<message>[^"]*)"$'
+    description: "SYST:ERR? の応答形式。例: +0,\"No error\""
+    fields: {}
 
 commands:
 

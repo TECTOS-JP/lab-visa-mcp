@@ -8,7 +8,8 @@ from fastmcp import FastMCP
 from visa_mcp.instrument_registry import InstrumentRegistry
 from visa_mcp.visa_manager import VisaManager
 from visa_mcp.session_manager import SessionManager
-from visa_mcp.tools import discovery, commands, pdf_extractor
+from visa_mcp.tools import discovery, commands, pdf_extractor, info
+from visa_mcp import safety as sf
 
 logging.basicConfig(
     level=logging.INFO,
@@ -18,18 +19,24 @@ logging.basicConfig(
 
 INSTRUMENTS_DIR = Path(__file__).parent.parent.parent / "instruments"
 
+_safety_mode = sf.get_safety_mode()
+
 mcp = FastMCP(
     name="visa-instrument-controller",
     instructions=(
-        "PyVISA 経由で GPIB / シリアル計測器を制御する MCP サーバーです。\n"
+        "PyVISA 経由で GPIB / USB / シリアル計測器を制御する MCP サーバーです。\n"
+        f"安全モード: {_safety_mode} (環境変数 VISA_MCP_SAFETY_MODE で変更可)\n"
         "使い方:\n"
         "1. list_resources で接続機器を列挙する\n"
         "2. identify_instrument または identify_all_instruments で機器を識別する\n"
         "   *IDN? 非対応の古い機器は bind_definition で手動バインドする\n"
-        "3. list_commands で利用可能なコマンドを確認する\n"
-        "4. execute_named_command で型安全にコマンドを実行する\n"
+        "3. get_instrument_info で機器仕様・安全制約を確認する (推奨)\n"
+        "4. list_commands で利用可能なコマンドを確認する\n"
+        "5. validate_operation で実行前に安全性を確認する (任意)\n"
+        "6. execute_named_command で型安全にコマンドを実行する\n"
         "   または query_instrument / send_command で任意のコマンドを直接送信する\n"
-        "5. 新しい機器の場合は extract_pdf_commands でマニュアル PDF から YAML 草案を生成する"
+        "安全制約違反時は警告レスポンスが返り、必要に応じて override_safety=True で\n"
+        "明示的に override 可能 (advisory モードのみ、override_reason 必須)"
     ),
 )
 
@@ -39,6 +46,7 @@ session_mgr = SessionManager(visa_mgr, registry)
 
 discovery.register_tools(mcp, session_mgr)
 commands.register_tools(mcp, session_mgr)
+info.register_tools(mcp, session_mgr)
 pdf_extractor.register_tools(mcp)
 
 
