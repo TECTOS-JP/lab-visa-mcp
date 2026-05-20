@@ -34,7 +34,10 @@ mcp = FastMCP(
         "4. list_commands で利用可能なコマンドを確認する\n"
         "5. validate_operation で実行前に安全性を確認する (任意)\n"
         "6. execute_named_command で型安全にコマンドを実行する\n"
-        "   または query_instrument / send_command で任意のコマンドを直接送信する\n"
+        "   任意 SCPI の直接送信は通常使用しない。\n"
+        "   VISA_MCP_ENABLE_RAW_COMMANDS=1 かつ non-strict モード時のみ\n"
+        "   unsafe_send_command / unsafe_query_instrument が登録される。\n"
+        "   これらは YAML 安全制約を介さないため、原則として使用しない。\n"
         "安全制約違反時は警告レスポンスが返り、必要に応じて override_safety=True で\n"
         "明示的に override 可能 (advisory モードのみ、override_reason 必須)"
     ),

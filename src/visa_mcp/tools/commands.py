@@ -16,33 +16,42 @@ logger = logging.getLogger(__name__)
 RAW_COMMANDS_ENABLED = os.environ.get("VISA_MCP_ENABLE_RAW_COMMANDS", "0").strip() == "1"
 
 # 危険キーワード（write 系: 機器状態を変更する可能性が高い）
-_DANGEROUS_KEYWORDS = [
-    "*RST", "*CLS", "*SAV",
-    "VOLT", "CURR", "OUTP", "SOUR", "CONF",
-    "FUNC", "RANG", "INIT", "TRIG",
-    "MEM", "STOR", "RECALL",
+# ロングフォームも検出するため (?:...) で短縮形と正式表記を両方カバーする
+_DANGEROUS_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
+    ("*RST",   re.compile(r"(?<![A-Z0-9])\*RST(?![A-Z0-9])")),
+    ("*CLS",   re.compile(r"(?<![A-Z0-9])\*CLS(?![A-Z0-9])")),
+    ("*SAV",   re.compile(r"(?<![A-Z0-9])\*SAV(?![A-Z0-9])")),
+    ("VOLT",   re.compile(r"(?<![A-Z0-9])VOLT(?:AGE)?(?![A-Z0-9])")),
+    ("CURR",   re.compile(r"(?<![A-Z0-9])CURR(?:ENT)?(?![A-Z0-9])")),
+    ("OUTP",   re.compile(r"(?<![A-Z0-9])OUTP(?:UT)?(?![A-Z0-9])")),
+    ("SOUR",   re.compile(r"(?<![A-Z0-9])SOUR(?:CE)?(?![A-Z0-9])")),
+    ("CONF",   re.compile(r"(?<![A-Z0-9])CONF(?:IGURE)?(?![A-Z0-9])")),
+    ("FUNC",   re.compile(r"(?<![A-Z0-9])FUNC(?:TION)?(?![A-Z0-9])")),
+    ("RANG",   re.compile(r"(?<![A-Z0-9])RANG(?:E)?(?![A-Z0-9])")),
+    ("INIT",   re.compile(r"(?<![A-Z0-9])INIT(?:IATE)?(?![A-Z0-9])")),
+    ("TRIG",   re.compile(r"(?<![A-Z0-9])TRIG(?:GER)?(?![A-Z0-9])")),
+    ("MEM",    re.compile(r"(?<![A-Z0-9])MEM(?:ORY)?(?![A-Z0-9])")),
+    ("STOR",   re.compile(r"(?<![A-Z0-9])STOR(?:E)?(?![A-Z0-9])")),
+    ("RECALL", re.compile(r"(?<![A-Z0-9])RECALL(?![A-Z0-9])")),
 ]
 
 
 def _detect_dangerous_keywords(command: str) -> list[str]:
-    """SCPI 文字列に危険キーワードが含まれるか検出。? を含む query 形式は除外する。
-    *RST のような IEEE 488.2 共通コマンドも対象に含めるため、
-    word boundary ではなく前後の文字を直接判定する。
+    """SCPI 文字列に危険キーワードが含まれるか検出する。
+
+    short form (VOLT) と long form (VOLTAGE) の両方を検出する。
+
+    スキップ条件: '?' を含み ';' を含まない pure query はスキップ。
+    ';' を含む複合コマンドは '?' があっても検査対象とする
+    (例: CONF:VOLT;READ? や INIT;*OPC? は書き込みを含む)。
     """
     cmd_upper = command.upper().strip()
-    if "?" in cmd_upper:
-        return []  # query 形式は基本的に状態を変更しない
+    if "?" in cmd_upper and ";" not in cmd_upper:
+        return []
     hits = []
-    for kw in _DANGEROUS_KEYWORDS:
-        kw_u = kw.upper()
-        # コマンド中に kw_u が出現し、前は非英数字 (もしくは行頭)、後は非英数字 (もしくは行末)
-        for m in re.finditer(re.escape(kw_u), cmd_upper):
-            before_ok = m.start() == 0 or not cmd_upper[m.start() - 1].isalnum()
-            after_idx = m.end()
-            after_ok = after_idx == len(cmd_upper) or not cmd_upper[after_idx].isalnum()
-            if before_ok and after_ok:
-                hits.append(kw)
-                break
+    for label, pattern in _DANGEROUS_PATTERNS:
+        if pattern.search(cmd_upper):
+            hits.append(label)
     return hits
 
 
