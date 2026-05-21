@@ -16,7 +16,10 @@ import time
 import uuid
 from typing import Any
 
-from visa_mcp.experiment_ir import CommandStep, Plan, WaitStep
+from visa_mcp.experiment_ir import (
+    CommandStep, Plan, WaitStep,
+    WaitUntilStep, WaitForConditionStep, WaitForStableStep,
+)
 from visa_mcp.job.state_machine import (
     CancelMode,
     JobStatus,
@@ -30,6 +33,11 @@ from visa_mcp.job.scheduler import (
 )
 from visa_mcp.recipe_executor import recipe_to_plan
 from visa_mcp.step_executor import execute_command_step, execute_wait_step
+from visa_mcp.polling_executor import (
+    execute_wait_until,
+    execute_wait_for_condition,
+    execute_wait_for_stable,
+)
 from visa_mcp.session_manager import SessionManager
 from visa_mcp.visa_manager import VisaManager
 
@@ -59,12 +67,9 @@ class _JobRuntime:
         self.cancel_mode: CancelMode | None = None  # 設定されたら cancel 要求中
         self.deadline = deadline                     # time.monotonic() 基準。None なら無期限
         # v0.5.0.3: queue 待ちから起動可能になった通知用。
-        # 旧コード (v0.5.0.2) は _wait_until_scheduled で遅延生成していたが、
-        # start_recipe_job 直後・task 実行前に on_terminal 経由の _wake_queued_job が
-        # 走ると runtime._start_event が None で wake が失われる lost-wake-up が
-        # 発生していた。eager 生成で解消する。
-        # immediate=True の Job では event.set() しても誰も待たないので影響なし。
         self._start_event: asyncio.Event = asyncio.Event()
+        # v0.5.1: 現在の polling 進捗 (get_job_status で公開)。polling 系 step が更新する。
+        self.current_progress: dict | None = None
 
     def is_timed_out(self) -> bool:
         return self.deadline is not None and time.monotonic() >= self.deadline
@@ -172,8 +177,21 @@ class JobManager:
             parameters=parameters,
         )
 
-        # 内部表現: 将来の Group/Map で複数 resource に拡張可能なよう list 化
-        required_resources = [resource_name]
+        # v0.5.1: required_resources を Plan ビルド時に決定 (polling 対象 instrument も含む)
+        # ここでは validation を兼ねて Plan を試し build する (式評価エラー等を早期検出)
+        # 失敗しても scheduler には primary のみを登録し、_run_job_inner で再 build & 適切に failed 化
+        try:
+            variables = dict(parameters)
+            for p in recipe.parameters:
+                if p.name not in variables and p.default is not None:
+                    variables[p.name] = p.default
+            tentative_plan = recipe_to_plan(
+                recipe, variables, primary_resource=resource_name,
+            )
+            required_resources = list(tentative_plan.required_resources) or [resource_name]
+        except Exception:
+            # build 失敗時は単一 resource で scheduler に投入し、_run_job_inner で failed にする
+            required_resources = [resource_name]
 
         # scheduler に投入
         try:
@@ -221,6 +239,287 @@ class JobManager:
             )
 
         return rec
+
+    async def start_wait_job(
+        self,
+        *,
+        wait_type: str,
+        params: dict[str, Any],
+        owner: str = "",
+        job_timeout_s: float | None = None,
+        queue_policy: QueuePolicy = "queue",
+    ) -> JobRecord:
+        """
+        v0.5.1: 単発の wait ジョブを起動する。
+
+        wait_type:
+          - "seconds":     params={"seconds": float}                       resource 不要
+          - "until":       params={"timestamp": ISO8601} or {"seconds_from_now": float}
+          - "condition":   params={"instrument", "command", "condition_expr",
+                                   "args"?, "interval_s"?, "timeout_s"?,
+                                   "value_path"?, ...}
+          - "stable_value":params={"instrument", "command", "tolerance", "window_s",
+                                   "args"?, "interval_s"?, "timeout_s"?, ...}
+
+        seconds/until は required_resources=[] (scheduler 即起動)。
+        condition/stable_value は params["instrument"] を required_resources に含める。
+        """
+        # IR Step を構築
+        try:
+            step = self._build_wait_step(wait_type, params)
+        except Exception as e:
+            return self._record_immediate_failure(
+                resource_name="",
+                recipe_name=f"wait_{wait_type}",
+                parameters=params,
+                error_class="validation",
+                summary=f"start_wait_job validation: {e}",
+            )
+
+        # 単一ステップ Plan
+        plan = Plan(
+            name=f"wait_{wait_type}",
+            steps=[step],
+            required_resources=self._extract_resources_from_step(step),
+        )
+
+        # JOB 登録
+        primary = plan.required_resources[0] if plan.required_resources else ""
+        job_id = self._new_job_id()
+        rec = self._store.create_job(
+            job_id=job_id,
+            owner=owner,
+            resource_name=primary,
+            recipe=f"<wait_{wait_type}>",
+            parameters=params,
+        )
+
+        # scheduler enqueue
+        try:
+            immediate, blocking = await self._scheduler.enqueue(
+                job_id, list(plan.required_resources), queue_policy=queue_policy,
+            )
+        except ResourceBusyError as e:
+            return self._store.transition_status(
+                job_id, JobStatus.FAILED,
+                error_class="blocked",
+                last_step_summary=f"resource busy (blocked by {e.blocking_job_id})",
+                result={
+                    "success": False, "error": "ResourceBusy",
+                    "message": str(e),
+                    "blocking_job_id": e.blocking_job_id,
+                    "queue_policy": queue_policy,
+                },
+            )
+
+        effective_timeout = (
+            DEFAULT_JOB_TIMEOUT_S if job_timeout_s is None else float(job_timeout_s)
+        )
+        deadline = time.monotonic() + effective_timeout if effective_timeout > 0 else None
+
+        task = asyncio.create_task(
+            self._run_wait_job(
+                rec, plan,
+                required_resources=list(plan.required_resources),
+                start_immediately=immediate,
+            ),
+            name=f"job-{job_id}",
+        )
+        self._runtimes[job_id] = _JobRuntime(task, deadline)
+
+        if not immediate:
+            self._store.update_step(
+                job_id, -1,
+                last_step_summary=f"queued, blocked_by={blocking}",
+            )
+
+        return rec
+
+    def _build_wait_step(self, wait_type: str, params: dict[str, Any]):
+        """wait_type + params から IR Step を構築 (validation 込み)"""
+        if wait_type == "seconds":
+            return WaitStep(seconds=float(params["seconds"]))
+        if wait_type == "until":
+            return WaitUntilStep(
+                timestamp=params.get("timestamp"),
+                seconds_from_now=(
+                    float(params["seconds_from_now"])
+                    if params.get("seconds_from_now") is not None else None
+                ),
+            )
+        if wait_type == "condition":
+            return WaitForConditionStep(
+                instrument=params["instrument"],
+                command=params["command"],
+                args=params.get("args") or {},
+                condition_expr=params["condition_expr"],
+                interval_s=float(params.get("interval_s", 1.0)),
+                timeout_s=float(params.get("timeout_s", 60.0)),
+                command_timeout_s=(
+                    float(params["command_timeout_s"])
+                    if params.get("command_timeout_s") is not None else None
+                ),
+                value_path=params.get("value_path"),
+                retry_on_error=int(params.get("retry_on_error", 1)),
+                max_consecutive_errors=int(params.get("max_consecutive_errors", 3)),
+            )
+        if wait_type == "stable_value":
+            return WaitForStableStep(
+                instrument=params["instrument"],
+                command=params["command"],
+                args=params.get("args") or {},
+                tolerance=float(params["tolerance"]),
+                window_s=float(params["window_s"]),
+                interval_s=float(params.get("interval_s", 1.0)),
+                timeout_s=float(params.get("timeout_s", 60.0)),
+                command_timeout_s=(
+                    float(params["command_timeout_s"])
+                    if params.get("command_timeout_s") is not None else None
+                ),
+                value_path=params.get("value_path"),
+                min_samples=int(params.get("min_samples", 3)),
+                retry_on_error=int(params.get("retry_on_error", 1)),
+                max_consecutive_errors=int(params.get("max_consecutive_errors", 3)),
+            )
+        raise ValueError(
+            f"未知の wait_type: {wait_type} "
+            f"(valid: seconds / until / condition / stable_value)"
+        )
+
+    @staticmethod
+    def _extract_resources_from_step(step) -> list[str]:
+        if isinstance(step, (WaitForConditionStep, WaitForStableStep)):
+            return [step.instrument]
+        return []
+
+    async def _run_wait_job(
+        self,
+        rec: JobRecord,
+        plan: Plan,
+        *,
+        required_resources: list[str],
+        start_immediately: bool,
+    ) -> None:
+        """単発 wait ジョブの bg 実行 (recipe を介さない)"""
+        job_id = rec.job_id
+        try:
+            if not start_immediately:
+                await self._wait_until_scheduled(job_id)
+            await self._scheduler.on_running(job_id)
+
+            runtime = self._runtimes.get(job_id)
+            if runtime is None:
+                return
+            current = self._store.get(job_id)
+            if current is not None and is_terminal(current.status):
+                return
+
+            self._store.transition_status(job_id, JobStatus.RUNNING, current_step_index=0)
+            step = plan.steps[0]
+            self._store.update_step(
+                job_id, 0, last_step_summary=self._step_summary(step),
+            )
+
+            self._safe_transition(job_id, JobStatus.WAITING)
+            try:
+                if isinstance(step, WaitStep):
+                    result = await self._run_wait_with_cancel_check(step, runtime)
+                elif isinstance(step, WaitUntilStep):
+                    result = await execute_wait_until(
+                        step,
+                        cancel_check=lambda: self._poll_cancel_reason(runtime),
+                        on_progress=lambda p: self._update_progress(runtime, p),
+                    )
+                elif isinstance(step, WaitForConditionStep):
+                    result = await execute_wait_for_condition(
+                        self._visa, self._sessions.get_session, step,
+                        cancel_check=lambda: self._poll_cancel_reason(runtime),
+                        on_progress=lambda p: self._update_progress(runtime, p),
+                    )
+                elif isinstance(step, WaitForStableStep):
+                    result = await execute_wait_for_stable(
+                        self._visa, self._sessions.get_session, step,
+                        cancel_check=lambda: self._poll_cancel_reason(runtime),
+                        on_progress=lambda p: self._update_progress(runtime, p),
+                    )
+                else:
+                    result = {"success": False, "error": "UnsupportedWaitType"}
+            finally:
+                runtime.current_progress = None
+
+            if result.get("success"):
+                self._store.transition_status(
+                    job_id, JobStatus.COMPLETED,
+                    current_step_index=0,
+                    last_step_summary="wait completed",
+                    result={
+                        "success": True, "recipe": rec.recipe,
+                        "steps_executed": [{"step": 0, **result}],
+                        "step_count": 1,
+                    },
+                )
+            elif result.get("interrupted_by_timeout"):
+                self._record_timeout(rec, 0, [{"step": 0, **result}])
+            elif result.get("interrupted_by_cancel"):
+                # cancel 経路へ
+                self._safe_transition(job_id, JobStatus.CANCELLING)
+                self._store.transition_status(
+                    job_id, JobStatus.CANCELLED,
+                    error_class="cancelled",
+                    last_step_summary="wait cancelled",
+                    result={
+                        "success": False, "recipe": rec.recipe,
+                        "steps_executed": [{"step": 0, **result}],
+                        "cancelled": True,
+                        "cancel_mode": (
+                            runtime.cancel_mode.value if runtime.cancel_mode else "?"
+                        ),
+                    },
+                )
+            else:
+                self._store.transition_status(
+                    job_id, JobStatus.FAILED,
+                    current_step_index=0,
+                    error_class=result.get("error", "internal"),
+                    last_step_summary=str(result.get("message", result.get("error", "?")))[:80],
+                    result={
+                        "success": False, "recipe": rec.recipe,
+                        "steps_executed": [{"step": 0, **result}],
+                        "halted_at_step": 0,
+                    },
+                )
+
+        except asyncio.CancelledError:
+            self._safe_transition(job_id, JobStatus.CANCELLING)
+            try:
+                self._store.transition_status(
+                    job_id, JobStatus.CANCELLED,
+                    error_class="cancelled",
+                    last_step_summary="cancelled (immediate)",
+                    result={
+                        "success": False, "recipe": rec.recipe,
+                        "cancelled": True, "cancel_mode": "immediate",
+                    },
+                )
+            except Exception:
+                pass
+            raise
+        except Exception as e:
+            logger.exception("wait job %s で予期しないエラー", job_id)
+            self._store.transition_status(
+                job_id, JobStatus.FAILED,
+                error_class="internal",
+                last_step_summary=f"unexpected: {e}",
+                result={"success": False, "error": "InternalError", "message": str(e)},
+            )
+        finally:
+            try:
+                next_jobs = await self._scheduler.on_terminal(job_id, required_resources)
+                for nj_id in next_jobs:
+                    self._wake_queued_job(nj_id)
+            except Exception:
+                pass
+            self._runtimes.pop(job_id, None)
 
     def get(self, job_id: str) -> JobRecord:
         rec = self._store.get(job_id)
@@ -451,9 +750,11 @@ class JobManager:
             if p.name not in variables and p.default is not None:
                 variables[p.name] = p.default
 
-        # Recipe → IR Plan 変換
+        # Recipe → IR Plan 変換 (primary_resource を渡すことで required_resources が確定)
         try:
-            plan: Plan = recipe_to_plan(recipe, variables)
+            plan: Plan = recipe_to_plan(
+                recipe, variables, primary_resource=rec.resource_name,
+            )
         except Exception as e:
             self._store.transition_status(
                 job_id, JobStatus.FAILED,
@@ -491,13 +792,45 @@ class JobManager:
 
                 # WaitStep は専用パス (cancel/timeout に即応)
                 if isinstance(step, WaitStep):
-                    # waiting 状態へ
                     self._safe_transition(job_id, JobStatus.WAITING)
                     result = await self._run_wait_with_cancel_check(step, runtime)
                     self._safe_transition(job_id, JobStatus.RUNNING)
+                elif isinstance(step, WaitUntilStep):
+                    self._safe_transition(job_id, JobStatus.WAITING)
+                    result = await execute_wait_until(
+                        step,
+                        cancel_check=lambda: self._poll_cancel_reason(runtime),
+                        on_progress=lambda p: self._update_progress(runtime, p),
+                    )
+                    runtime.current_progress = None
+                    self._safe_transition(job_id, JobStatus.RUNNING)
+                elif isinstance(step, WaitForConditionStep):
+                    self._safe_transition(job_id, JobStatus.WAITING)
+                    result = await execute_wait_for_condition(
+                        self._visa, self._sessions.get_session, step,
+                        cancel_check=lambda: self._poll_cancel_reason(runtime),
+                        on_progress=lambda p: self._update_progress(runtime, p),
+                    )
+                    runtime.current_progress = None
+                    self._safe_transition(job_id, JobStatus.RUNNING)
+                elif isinstance(step, WaitForStableStep):
+                    self._safe_transition(job_id, JobStatus.WAITING)
+                    result = await execute_wait_for_stable(
+                        self._visa, self._sessions.get_session, step,
+                        cancel_check=lambda: self._poll_cancel_reason(runtime),
+                        on_progress=lambda p: self._update_progress(runtime, p),
+                    )
+                    runtime.current_progress = None
+                    self._safe_transition(job_id, JobStatus.RUNNING)
                 elif isinstance(step, CommandStep):
+                    # v0.5.1: instrument 指定があれば別 session を使う
+                    target_session = session
+                    if step.instrument:
+                        alt = self._sessions.get_session(step.instrument)
+                        if alt is not None:
+                            target_session = alt
                     result = await execute_command_step(
-                        self._visa, session, step,
+                        self._visa, target_session, step,
                         override_safety=override_safety,
                         override_reason=override_reason,
                     )
@@ -861,6 +1194,27 @@ class JobManager:
             "steps": steps_result,
         }
 
+    @staticmethod
+    def _poll_cancel_reason(runtime: "_JobRuntime") -> str | None:
+        """polling_executor の cancel_check 用。timeout / cancel を文字列で通知。"""
+        if runtime.is_timed_out():
+            return "timeout"
+        if runtime.cancel_mode is not None:
+            return "cancel"
+        return None
+
+    @staticmethod
+    def _update_progress(runtime: "_JobRuntime", progress: dict) -> None:
+        """polling step が runtime.current_progress に書き戻す (get_job_status で公開)"""
+        runtime.current_progress = progress
+
+    def get_progress(self, job_id: str) -> dict | None:
+        """v0.5.1: 現在の polling 進捗 (なければ None)"""
+        rt = self._runtimes.get(job_id)
+        if rt is None:
+            return None
+        return rt.current_progress
+
     def _safe_transition(self, job_id: str, to: JobStatus) -> None:
         """遷移ルール違反は黙って無視 (cancelling 中の状態変更等)"""
         try:
@@ -872,6 +1226,19 @@ class JobManager:
     def _step_summary(step) -> str:
         if isinstance(step, WaitStep):
             return f"wait {step.seconds}s"
+        if isinstance(step, WaitUntilStep):
+            target = step.timestamp or f"+{step.seconds_from_now}s"
+            return f"wait_until {target}"
+        if isinstance(step, WaitForConditionStep):
+            return (
+                f"wait_for_condition {step.instrument}.{step.command} "
+                f"[{step.condition_expr}]"
+            )
+        if isinstance(step, WaitForStableStep):
+            return (
+                f"wait_for_stable {step.instrument}.{step.command} "
+                f"tol={step.tolerance} window={step.window_s}s"
+            )
         if isinstance(step, CommandStep):
             return f"command {step.command}"
         return f"step type={getattr(step, 'type', '?')}"

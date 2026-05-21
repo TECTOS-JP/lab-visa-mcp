@@ -27,6 +27,11 @@ class CommandDefinition(BaseModel):
     parameters: list[ParameterDefinition] = Field(default_factory=list)
     returns: ReturnDefinition = Field(default_factory=ReturnDefinition)
     timeout_ms: int | None = None          # 省略時は connection.default_timeout_ms を使用
+    # v0.5.1: polling wait (wait_for_condition / wait_for_stable) で
+    # 副作用なく定期的に呼び出してよい query かどうかのヒント。
+    # True の場合のみ、polling wait の command として推奨される。
+    # False/未指定の場合は polling 可能だが警告メッセージに含められる。
+    polling_safe: bool = False
 
 
 class IdentificationConfig(BaseModel):
@@ -122,17 +127,29 @@ class RecipeStep(BaseModel):
     """
     recipe の 1 ステップ。
 
-    v0.5.0-rc1 から下記 2 種類のステップ型をサポート:
+    v0.5.0-rc1 から下記のステップ型をサポート:
     - **command step**: `command` を指定 (従来通り)、機器コマンドを実行
-    - **wait step**: `wait: { seconds: N }` を指定、N 秒待機 (新規)
+    - **wait step**: `wait: { seconds: N }` を指定、N 秒待機
 
-    どちらか一方を必ず指定する (両方指定や両方未指定はエラー)。
+    v0.5.1 で polling 系を追加:
+    - **wait_until step**:        `wait_until: { timestamp: ... | seconds_from_now: ... }`
+    - **wait_for_condition step**:`wait_for_condition: {...}`
+    - **wait_for_stable step**:   `wait_for_stable: {...}`
+
+    いずれか一つを必ず指定する (複数指定はエラー)。
 
     YAML 例:
         steps:
           - { command: "set_voltage", args: { voltage: 5 } }
           - wait: { seconds: 60 }
-          - { command: "measure_voltage" }
+          - wait_for_stable:
+              instrument: temp1
+              command: measure_temperature
+              tolerance: 0.2
+              window_s: 60
+              interval_s: 5
+              timeout_s: 1800
+          - { command: "measure_temperature" }
     """
     # command step フィールド (従来)
     command: str | None = None              # YAML commands のキーを参照
@@ -142,23 +159,33 @@ class RecipeStep(BaseModel):
     description: str = ""
     # wait step フィールド (v0.5.0-rc1)
     wait: dict[str, Any] | None = None      # 例: {"seconds": 60}
+    # v0.5.1: polling / 絶対待機
+    wait_until: dict[str, Any] | None = None
+    wait_for_condition: dict[str, Any] | None = None
+    wait_for_stable: dict[str, Any] | None = None
 
     @model_validator(mode="after")
     def _exactly_one_step_type(self) -> "RecipeStep":
-        has_command = self.command is not None and self.command != ""
-        has_wait = self.wait is not None
-        if has_command and has_wait:
+        flags = {
+            "command":            self.command is not None and self.command != "",
+            "wait":               self.wait is not None,
+            "wait_until":         self.wait_until is not None,
+            "wait_for_condition": self.wait_for_condition is not None,
+            "wait_for_stable":    self.wait_for_stable is not None,
+        }
+        active = [k for k, v in flags.items() if v]
+        if len(active) > 1:
             raise ValueError(
-                "RecipeStep には command と wait の両方を指定できません (どちらか一方のみ)"
+                f"RecipeStep には command / wait / wait_until / wait_for_condition / "
+                f"wait_for_stable のうち 1 つだけを指定してください (検出: {active})"
             )
-        if not has_command and not has_wait:
+        if not active:
             raise ValueError(
-                "RecipeStep には command または wait のいずれかを指定する必要があります"
+                "RecipeStep には command / wait / wait_until / wait_for_condition / "
+                "wait_for_stable のいずれかが必須です"
             )
-        # wait の中身を最小限検証
-        # seconds は数値リテラル、または "$var" / "$var * 1.1" 形式の式文字列を許容。
-        # 式の場合の実値検証は recipe_executor.recipe_to_plan で式評価時に行う。
-        if has_wait:
+
+        if flags["wait"]:
             if "seconds" not in self.wait:
                 raise ValueError("wait step には seconds が必須です")
             sec = self.wait["seconds"]
@@ -174,12 +201,44 @@ class RecipeStep(BaseModel):
                         raise ValueError("wait.seconds は 0 以上である必要があります")
                 except (TypeError, ValueError) as e:
                     raise ValueError(f"wait.seconds は数値である必要があります: {e}")
+
+        # polling 系の dict 内容は recipe_to_plan で IR モデルに変換時に検証される。
+        # ここでは必須キーの存在のみ最小限チェック。
+        if flags["wait_for_condition"]:
+            wfc = self.wait_for_condition
+            for k in ("instrument", "command", "condition_expr"):
+                if k not in wfc:
+                    raise ValueError(f"wait_for_condition には '{k}' が必須です")
+
+        if flags["wait_for_stable"]:
+            wfs = self.wait_for_stable
+            for k in ("instrument", "command", "tolerance", "window_s"):
+                if k not in wfs:
+                    raise ValueError(f"wait_for_stable には '{k}' が必須です")
+
+        if flags["wait_until"]:
+            wu = self.wait_until
+            has_ts = "timestamp" in wu and wu["timestamp"]
+            has_sec = "seconds_from_now" in wu and wu["seconds_from_now"] is not None
+            if has_ts and has_sec:
+                raise ValueError(
+                    "wait_until: timestamp と seconds_from_now は排他です"
+                )
+            if not (has_ts or has_sec):
+                raise ValueError(
+                    "wait_until: timestamp または seconds_from_now のいずれかが必須です"
+                )
+
         return self
 
     @property
     def step_type(self) -> str:
-        """このステップが command か wait かを返す (実行エンジン用)。"""
-        return "wait" if self.wait is not None else "command"
+        """このステップ種別を返す (実行エンジン用)。"""
+        if self.wait is not None: return "wait"
+        if self.wait_until is not None: return "wait_until"
+        if self.wait_for_condition is not None: return "wait_for_condition"
+        if self.wait_for_stable is not None: return "wait_for_stable"
+        return "command"
 
 
 class RecipeDefinition(BaseModel):

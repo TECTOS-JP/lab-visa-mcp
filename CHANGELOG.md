@@ -1,5 +1,191 @@
 # 変更履歴
 
+## v0.5.1 — Polling wait (条件待機 / 安定待機 / 絶対時刻待機) + start_wait_job
+
+v0.5.0 系で導入した Job MVP を、**条件待機**できるレベルへ拡張。
+温度が安定するまで待つ、ある電圧を超えたら次へ進む、といった「実験で頻発する待ち」を
+LLM 側がブロックせずに表現できるようになる。
+
+### 新規 Step 型 (内部 IR)
+
+`src/visa_mcp/experiment_ir/step.py` に discriminated union として追加:
+
+- **`WaitUntilStep`** ── ISO8601 絶対時刻 / `seconds_from_now` 相対秒数まで待機
+- **`WaitForConditionStep`** ── `condition_expr` が True を返すまで polling
+  - 例: `"value > 80"`、`"abs(value - 25) < 0.2"`、`"value < 10 or value > 20"`
+- **`WaitForStableStep`** ── 測定値の `max - min <= tolerance` (window_s 内) になるまで polling
+
+すべて `interval_s` / `timeout_s` / `command_timeout_s` の **3 層タイムアウト**、
+`retry_on_error` / `max_consecutive_errors` (デフォルト 3) の error policy、
+`value_path` による測定値抽出ヒントを持つ。
+
+### YAML / Recipe 拡張
+
+`RecipeStep` (`models/instrument_def.py`) で下記キーを認識するようになった:
+
+```yaml
+recipes:
+  voltage_then_stable_temp:
+    parameters: []
+    steps:
+      - { command: "set_voltage", args: { voltage: 5 } }
+      - wait_for_stable:
+          instrument: "TEMP::INSTR"
+          command: "measure_temperature"
+          tolerance: 0.2
+          window_s: 60
+          interval_s: 5
+          timeout_s: 1800
+      - { command: "measure_current" }
+```
+
+`command` / `wait` / `wait_until` / `wait_for_condition` / `wait_for_stable` のうち
+**1 つだけ**を指定する (model_validator で検証)。既存 recipe は全て後方互換。
+
+### 多重 resource 占有 (重要)
+
+polling step が **recipe の主 resource とは別の instrument** を参照する場合、
+その resource も Job 起動時に `ResourceScheduler` で占有される。
+
+- 例: PSU で電圧を設定 → 温度計で stable 待ち → PSU で電流測定
+  という recipe では、PSU と温度計の **両方が** 同時に lock される
+- `Plan.required_resources: list[str]` を新設、`recipe_to_plan(..., primary_resource=)`
+  が polling step の `instrument` を再帰収集して canonical sorted で返す
+- これにより v0.5.0 で潰した「Job interleave」問題が polling 対象 resource でも発生しない
+
+deadlock 回避のため、複数 resource は **canonical sorted (`sorted(set(...))`)** で
+scheduler に渡される。
+
+### Polling 設計 (visa_mcp_v0.5.1の実装方針.md より採用)
+
+- **安定判定**: `max(samples_in_window) - min(samples_in_window) <= tolerance`
+- **最初の測定**: 開始直後 (`t=0`) に 1 回、その後 `interval_s` 間隔
+- **cancel/timeout 即応**: polling interval 中も `POLL_SLEEP_SLICE_S = 0.2s` 単位でスライス
+- **値抽出順序**:
+  1. `value_path` が指定されていれば parsed[value_path]
+  2. parsed["value"]
+  3. 単一数値フィールド
+  4. raw を float 化
+  5. すべて失敗なら parse エラー
+- **error policy**: 1 polling 失敗時は `retry_on_error` 回まで即時 retry、
+  連続失敗が `max_consecutive_errors` を超えたら step failed
+- **timeout 階層 (3 種)**: `command_timeout_s` (1 query) < `timeout_s` (条件全体) < `job_timeout_s`
+- **単位変換しない**: command 返り値をそのまま評価 (将来 `state_query` で対応予定)
+
+### `condition_expr` の安全評価
+
+`utils/condition.py` に `safe_eval_condition()` を新設。許可するもの:
+
+- 変数 `value`
+- 数値リテラル
+- 比較 (`< <= > >= == !=`)
+- 論理 (`and / or / not`)
+- 算術 (`+ - * / // % **`)
+- 単項 (`+x / -x`)
+- 関数呼び出しは **`abs(...)` のみ**
+
+禁止: 属性アクセス / 任意関数呼び出し / import / indexing / 文字列 / 代入 / 内包表記 / lambda。
+既存の `utils/expression.safe_eval` とは別関数として実装 (こちらはブール返却・比較演算サポート)。
+
+### 新規 MCP ツール: `start_wait_job` (21 番目)
+
+```python
+start_wait_job(
+    wait_type: "seconds" | "until" | "condition" | "stable_value",
+    params: dict,
+    owner: str = "",
+    job_timeout_s: float = 0,
+    queue_policy: "queue" | "reject_if_busy" = "queue",
+) -> dict
+```
+
+- `seconds` / `until` は **resource を取らない** (scheduler 即起動)
+- `condition` / `stable_value` は `params["instrument"]` を required_resources に持つ
+- レスポンスに `data.scheduling` を含む (`immediate_start` / `blocked_by_job` 等)
+
+JobManager 側に `start_wait_job` / `_run_wait_job` / `_build_wait_step` を追加。
+
+### `get_job_status` に polling progress 公開
+
+`waiting` / `running` 状態の Job に polling step が走っている場合、
+`data.polling` に下記を含める:
+
+```json
+{
+  "step_type": "wait_for_stable",
+  "instrument": "TEMP::INSTR",
+  "command": "measure_temperature",
+  "elapsed_s": 42.1,
+  "timeout_remaining_s": 1757.9,
+  "sample_count": 8,
+  "last_value": 25.31,
+  "current_delta": 0.18,
+  "tolerance": 0.2,
+  "window_s": 60.0,
+  "stable": false,
+  "next_poll_in_s": 2.4,
+  "polling_safe_warning": null
+}
+```
+
+エージェントが「まだ安定待ち、現在 25.31℃、変動幅 0.18℃」と状況判断できる。
+
+### `CommandDefinition.polling_safe`
+
+```yaml
+commands:
+  measure_temperature:
+    scpi: "MEAS:TEMP?"
+    type: "query"
+    polling_safe: true       # v0.5.1 追加
+```
+
+副作用のない query かどうかのヒント。`wait_for_stable` / `wait_for_condition` で
+`polling_safe=False` の command を使うと、結果 dict の `polling_safe_warning` に
+警告メッセージが入る (実行はブロックしない、v0.5.1 では情報通知のみ)。
+
+### IR validation 厳密化
+
+`WaitForStableStep` で次を model_validator として強制:
+
+- `interval_s > 0`、`timeout_s > 0`、`window_s > 0`、`tolerance >= 0`、`min_samples >= 2`
+- `window_s <= timeout_s`
+- `interval_s <= window_s`
+- `ceil(window_s / interval_s) + 1 >= min_samples` ── サンプル数下限
+
+### テスト
+
+`tests/test_polling_wait_v051.py` に 28 件追加 (合計 **243 passed**)。
+
+- 条件式評価 (比較・論理・abs・禁止構文)
+- 値抽出 (value_path / value キー / 単一数値 / raw float / 失敗)
+- IR validation (window/interval/timeout 関係、wait_until 排他)
+- polling 実行 (immediate success / timeout / cancel)
+- stable 実行 (一定値で成功 / 振動で timeout / cancel)
+- error retry (1 回失敗 → retry 成功)
+- 連続失敗 → step failed
+- wait_until (相対秒数)
+- **`test_recipe_with_polling_holds_lock_on_temp_resource`** ── polling 対象 instrument
+  が `required_resources` に含まれることを scheduler snapshot で確認
+- `start_wait_job` (seconds は resource 無し、condition は instrument 占有)
+- polling 中の `get_progress` で進捗が取れる
+
+### 後方互換
+
+- 既存の 20 MCP ツール / v0.5.0 YAML / v0.4.x recipe は全て不変
+- 既存 215 テストは全パス (新規 28 件と合わせ 243 件)
+
+### 実装しない (v0.5.1 スコープ外)
+
+- 単位変換 (v0.7.0 `state_query` で対応)
+- `stddev` / `slope` 安定判定 (v0.5.1 は `method="range"` のみ)
+- `monitor_data` 永続化 (v0.7.0)
+- `job_events` 完全実装 (v0.7.0)
+- branch / loop step (v0.8.0 DSL)
+- notification / callback (v0.8.0)
+
+---
+
 ## v0.5.0.4 — 外部レビュー対応 (API 露出 + ドキュメント整合 + safe_shutdown 構造化)
 
 v0.5.0.2/v0.5.0.3 公開後の外部レビューで指摘された P0 三件 + P1 三件への対応。

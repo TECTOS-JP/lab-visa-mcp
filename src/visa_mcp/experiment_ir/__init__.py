@@ -10,6 +10,9 @@ visa_mcp 本体の他モジュールへの直接依存を最小化している (
 from visa_mcp.experiment_ir.step import (
     CommandStep,
     WaitStep,
+    WaitUntilStep,
+    WaitForConditionStep,
+    WaitForStableStep,
     Step,
 )
 from visa_mcp.experiment_ir.plan import Plan
@@ -17,6 +20,9 @@ from visa_mcp.experiment_ir.plan import Plan
 __all__ = [
     "CommandStep",
     "WaitStep",
+    "WaitUntilStep",
+    "WaitForConditionStep",
+    "WaitForStableStep",
     "Step",
     "Plan",
 ]

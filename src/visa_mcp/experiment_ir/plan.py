@@ -22,12 +22,16 @@ class Plan(BaseModel):
     - `parameters`: Plan 全体に渡される変数辞書 ($var で参照される)
     - `steps`: 順次実行されるステップのリスト
     - `resource_hint`: 主に使用するリソース名 (Job manager の lock 取得に使用、optional)
+    - `required_resources`: v0.5.1 ── この Plan が排他占有する必要がある instrument
+      (resource_name または alias) のリスト。canonical sorted 順。
+      polling 系 wait step が別 instrument を参照する場合もここに含める。
     - `metadata`: 任意の追加情報 (生成元 recipe 名、生成時刻 等)
     """
     name: str = ""
     parameters: dict[str, Any] = Field(default_factory=dict)
     steps: list[Step] = Field(default_factory=list)
     resource_hint: str | None = None
+    required_resources: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     @property

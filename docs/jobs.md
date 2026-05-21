@@ -1,7 +1,10 @@
-# Job モデル (v0.5.0)
+# Job モデル (v0.5.0 / v0.5.1)
 
 長時間 Recipe をバックグラウンドで実行・追跡・キャンセルできる非同期 Job 基盤。
 LLM のツール呼び出しをブロックせず、複数の実験を並行管理できる。
+
+v0.5.1 で **polling wait** (条件待機 / 安定待機 / 絶対時刻待機) と
+専用 MCP ツール `start_wait_job` を追加。詳細は本ドキュメント末尾。
 
 ## 概要
 
@@ -268,3 +271,132 @@ cancel_job(
   safe_shutdown) に従う
 - Job 内の各 step は既存の安全制約 (`safety`) 検証を通る (Job だからといって緩くならない)
 - 監査ログ (`~/.visa-mcp/audit.log`) も従来通り記録される
+
+---
+
+## v0.5.1: Polling wait
+
+長時間にわたって測定値を監視し、条件を満たすまで / 値が安定するまで待つステップ。
+Recipe 内の step、または `start_wait_job` MCP ツール経由で単発 Job として起動できる。
+
+### Step 型
+
+| step type | 用途 | 必須キー |
+|-----------|------|---------|
+| `wait_until` | 絶対時刻 / 相対秒数まで待つ | `timestamp` または `seconds_from_now` |
+| `wait_for_condition` | `condition_expr` が True になるまで polling | `instrument`, `command`, `condition_expr` |
+| `wait_for_stable` | `max - min <= tolerance` (window 内) で安定 | `instrument`, `command`, `tolerance`, `window_s` |
+
+共通オプション (polling 系):
+
+```
+interval_s: 1.0          # poll 間隔
+timeout_s: 60.0          # 条件全体の制限
+command_timeout_s: null  # 1 query の VISA timeout (null=command 定義値)
+value_path: null         # parsed response の数値フィールド名
+retry_on_error: 1        # 1 polling 失敗時の即時 retry 回数
+max_consecutive_errors: 3 # 連続失敗許容数 (超過で step failed)
+```
+
+### Recipe 例
+
+```yaml
+recipes:
+  voltage_then_stable_temp:
+    steps:
+      - { command: "set_voltage", args: { voltage: 5 } }
+      - wait_for_stable:
+          instrument: "TEMP::INSTR"
+          command: "measure_temperature"
+          tolerance: 0.2
+          window_s: 60
+          interval_s: 5
+          timeout_s: 1800
+          value_path: "temperature"
+      - { command: "measure_current", result_as: "i" }
+```
+
+このとき Job は **PSU + TEMP::INSTR の両方の resource** を占有する。
+他の Job が同じ resource を取ろうとすると queued になる。
+
+### condition_expr の文法
+
+許可: 変数 `value`、数値リテラル、比較 (`< <= > >= == !=`)、論理 (`and / or / not`)、
+算術、`abs(...)`。禁止: 属性アクセス、関数呼び出し全般 (`abs` を除く)、import、indexing、
+文字列操作、代入、内包表記、lambda。
+
+```
+value > 80
+abs(value - 25) < 0.2
+value > 10 and value < 20
+```
+
+### wait_for_stable の安定判定
+
+```
+最新サンプル時刻から window_s 内に min_samples (デフォルト 3) 以上のサンプルがあり、
+max(window samples) - min(window samples) <= tolerance
+```
+
+method は v0.5.1 では `"range"` のみ。`tolerance` は片側ではなく **幅** (`max - min`) として
+比較される (`±0.2` ではなく `0.2`)。
+
+### MCP ツール: `start_wait_job`
+
+```
+start_wait_job(
+    wait_type: "seconds" | "until" | "condition" | "stable_value",
+    params: {...},
+    owner: str = "",
+    job_timeout_s: float = 0,
+    queue_policy: "queue" | "reject_if_busy" = "queue",
+)
+```
+
+- `seconds` / `until`: resource を取らない (即起動)
+- `condition` / `stable_value`: `params.instrument` を resource lock 対象に含む
+
+### `get_job_status` の polling 進捗
+
+polling 中の Job は `data.polling` フィールドを含む:
+
+```json
+{
+  "data": {
+    "status": "waiting",
+    "polling": {
+      "step_type": "wait_for_stable",
+      "instrument": "TEMP::INSTR",
+      "elapsed_s": 42.1,
+      "timeout_remaining_s": 1757.9,
+      "sample_count": 8,
+      "last_value": 25.31,
+      "current_delta": 0.18,
+      "tolerance": 0.2,
+      "stable": false,
+      "next_poll_in_s": 2.4
+    }
+  }
+}
+```
+
+### `polling_safe` フラグ (機器定義側)
+
+```yaml
+commands:
+  measure_temperature:
+    scpi: "MEAS:TEMP?"
+    type: "query"
+    polling_safe: true   # 副作用無く繰り返し呼んで良い query
+```
+
+`polling_safe: false` の command を polling step に使うと結果 dict に
+`polling_safe_warning` 文字列が付与される (実行はブロックしない、警告のみ)。
+
+### 設計上の注意 (v0.5.1)
+
+- polling sleep は `POLL_SLEEP_SLICE_S = 0.2s` 単位でスライス → cancel / timeout に即応
+- 開始直後 (`t=0`) に 1 回目の measurement を取る (エージェントが即進捗を知れる)
+- 多重 resource lock は **canonical sorted 順** で取得 (deadlock 回避)
+- 単位変換は **しない** (`MEAS:TEMP?` が "25.3" を返したらそのまま 25.3 として評価)
+- timeout は 3 階層 (`command_timeout_s < timeout_s < job_timeout_s`)、混同しない

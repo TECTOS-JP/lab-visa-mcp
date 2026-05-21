@@ -70,7 +70,7 @@ Claude に話しかける：
 >
 > 「USB0::0x... を identify_instrument で識別して、5V 出力するように設定してください」
 
-## 提供される MCP ツール（20 個 / raw 系は別途オプトイン）
+## 提供される MCP ツール（21 個 / raw 系は別途オプトイン）
 
 ### 識別・情報
 
@@ -96,12 +96,13 @@ Claude に話しかける：
 | `list_recipes` | 利用可能な典型ワークフロー一覧 |
 | `execute_recipe` | 複数コマンドの安全な順次実行 |
 
-### **Job (バックグラウンド実行)** ★v0.5.0 新規
+### **Job (バックグラウンド実行)** ★v0.5.0 新規 / `start_wait_job` は v0.5.1
 
 | ツール | 用途 |
 |-------|------|
 | `start_recipe_job` | recipe を Job として登録、即 job_id 返却 |
-| `get_job_status` | Job の現在状態 (短いレスポンス) |
+| `start_wait_job` | 単発 wait ジョブ (seconds / until / condition / stable_value) を起動 ★v0.5.1 |
+| `get_job_status` | Job の現在状態 + polling 進捗 |
 | `get_job_result` | 完了/失敗時の完全結果 + 次手候補 |
 | `list_jobs` | Job 一覧 (status / owner / limit で絞り込み) |
 | `cancel_job` | Job キャンセル (immediate / after_current_step / safe_shutdown) |

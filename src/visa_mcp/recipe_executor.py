@@ -19,7 +19,10 @@ import asyncio
 import logging
 from typing import Any
 
-from .experiment_ir import CommandStep, Plan, Step, WaitStep
+from .experiment_ir import (
+    CommandStep, Plan, Step, WaitStep,
+    WaitUntilStep, WaitForConditionStep, WaitForStableStep,
+)
 from .models.instrument_def import InstrumentDefinition, RecipeDefinition, RecipeStep
 from .step_executor import execute_command_step, execute_wait_step
 from .utils.expression import resolve_arg, ExpressionError
@@ -33,20 +36,90 @@ logger = logging.getLogger(__name__)
 # Recipe → IR Plan 変換
 # ============================================================
 
-def recipe_to_plan(recipe: RecipeDefinition, variables: dict[str, Any]) -> Plan:
+def recipe_to_plan(
+    recipe: RecipeDefinition,
+    variables: dict[str, Any],
+    *,
+    primary_resource: str | None = None,
+) -> Plan:
     """
     YAML の RecipeDefinition + 変数辞書 → IR Plan に変換する。
     args 内の `$var` / `$var * 1.1` 等の式は事前に評価して具体値にする。
 
-    式評価エラーが起きると ExpressionError が propagate するので、呼び出し側で捕捉する。
+    primary_resource を渡すと Plan.required_resources の起点となる。
+    polling 系 step が別 instrument を参照する場合、そのリソースも required_resources に追加される。
+    canonical sorted 順で deduplicate。
     """
     plan_steps: list[Step] = []
+    aux_resources: set[str] = set()
+
     for rs in recipe.steps:
-        if rs.step_type == "wait":
+        st = rs.step_type
+        if st == "wait":
             seconds_raw = rs.wait["seconds"]
             seconds = float(resolve_arg(seconds_raw, variables))
             plan_steps.append(WaitStep(
                 seconds=seconds,
+                description=rs.description,
+            ))
+        elif st == "wait_until":
+            wu = dict(rs.wait_until)
+            sec = wu.get("seconds_from_now")
+            if isinstance(sec, str):
+                sec = float(resolve_arg(sec, variables))
+                wu["seconds_from_now"] = sec
+            plan_steps.append(WaitUntilStep(
+                timestamp=wu.get("timestamp"),
+                seconds_from_now=wu.get("seconds_from_now"),
+                description=rs.description,
+            ))
+        elif st == "wait_for_condition":
+            wfc = dict(rs.wait_for_condition)
+            resolved_args = {
+                k: resolve_arg(v, variables) for k, v in (wfc.get("args") or {}).items()
+            }
+            inst = wfc["instrument"]
+            aux_resources.add(inst)
+            plan_steps.append(WaitForConditionStep(
+                instrument=inst,
+                command=wfc["command"],
+                args=resolved_args,
+                condition_expr=wfc["condition_expr"],
+                interval_s=float(resolve_arg(wfc.get("interval_s", 1.0), variables)),
+                timeout_s=float(resolve_arg(wfc.get("timeout_s", 60.0), variables)),
+                command_timeout_s=(
+                    float(resolve_arg(wfc["command_timeout_s"], variables))
+                    if wfc.get("command_timeout_s") is not None else None
+                ),
+                value_path=wfc.get("value_path"),
+                retry_on_error=int(wfc.get("retry_on_error", 1)),
+                max_consecutive_errors=int(wfc.get("max_consecutive_errors", 3)),
+                description=rs.description,
+            ))
+        elif st == "wait_for_stable":
+            wfs = dict(rs.wait_for_stable)
+            resolved_args = {
+                k: resolve_arg(v, variables) for k, v in (wfs.get("args") or {}).items()
+            }
+            inst = wfs["instrument"]
+            aux_resources.add(inst)
+            plan_steps.append(WaitForStableStep(
+                instrument=inst,
+                command=wfs["command"],
+                args=resolved_args,
+                tolerance=float(resolve_arg(wfs["tolerance"], variables)),
+                window_s=float(resolve_arg(wfs["window_s"], variables)),
+                interval_s=float(resolve_arg(wfs.get("interval_s", 1.0), variables)),
+                timeout_s=float(resolve_arg(wfs.get("timeout_s", 60.0), variables)),
+                command_timeout_s=(
+                    float(resolve_arg(wfs["command_timeout_s"], variables))
+                    if wfs.get("command_timeout_s") is not None else None
+                ),
+                value_path=wfs.get("value_path"),
+                min_samples=int(wfs.get("min_samples", 3)),
+                method=wfs.get("method", "range"),
+                retry_on_error=int(wfs.get("retry_on_error", 1)),
+                max_consecutive_errors=int(wfs.get("max_consecutive_errors", 3)),
                 description=rs.description,
             ))
         else:  # command
@@ -58,10 +131,18 @@ def recipe_to_plan(recipe: RecipeDefinition, variables: dict[str, Any]) -> Plan:
                 description=rs.description,
             ))
 
+    # required_resources: primary + aux を canonical sorted
+    req: set[str] = set(aux_resources)
+    if primary_resource:
+        req.add(primary_resource)
+    required = sorted(req)
+
     return Plan(
         name=(recipe.description[:80] if recipe.description else "recipe"),
         parameters=dict(variables),
         steps=plan_steps,
+        resource_hint=primary_resource,
+        required_resources=required,
     )
 
 

@@ -10,6 +10,7 @@ from visa_mcp.visa_manager import VisaManager
 from visa_mcp.session_manager import SessionManager
 from visa_mcp.tools import discovery, commands, pdf_extractor, info, recipes
 from visa_mcp.tools import jobs as jobs_tools
+from visa_mcp.tools import waits as waits_tools
 from visa_mcp.job import JobManager
 from visa_mcp import safety as sf
 
@@ -71,6 +72,7 @@ commands.register_tools(mcp, session_mgr)
 info.register_tools(mcp, session_mgr)
 recipes.register_tools(mcp, session_mgr)
 jobs_tools.register_tools(mcp, job_mgr)
+waits_tools.register_tools(mcp, job_mgr)
 pdf_extractor.register_tools(mcp)
 
 

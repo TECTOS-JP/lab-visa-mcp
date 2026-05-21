@@ -280,6 +280,14 @@ def register_tools(mcp: FastMCP, job_mgr: JobManager) -> None:
                     data["queue"] = qinfo
             except Exception:
                 pass
+        # v0.5.1: polling 進捗の公開 (waiting 中の wait_for_condition / wait_for_stable / wait_until)
+        if rec.status in (JobStatus.WAITING, JobStatus.RUNNING):
+            try:
+                prog = job_mgr.get_progress(rec.job_id)
+                if prog:
+                    data["polling"] = prog
+            except Exception:
+                pass
         return make_envelope("ok", data=data, job_id=rec.job_id)
 
     @mcp.tool()
