@@ -38,11 +38,15 @@ class FailurePolicy:
     retry: 同一 target を全体再実行する最大回数 (target 単位リトライ、step 部分リトライではない)
     stop_if_failure_rate_exceeds_threshold: 0.0-1.0
     cancel_running_on_policy_stop:
-      stop_on_first_error / stop_if_failure_rate_exceeds 時に、既に実行中の
-      target に対して cancel を要求するか (True なら after_current_step 相当)
+      **v0.6.0.1 では予約フィールド (未実装)**。
+      stop_on_first_error / stop_if_failure_rate_exceeds 時に既に実行中の
+      target に cancel を要求する設計だが、v0.6.0.1 では stop_requested フラグは
+      未開始 target を skipped にするのみに使用。実行中 target は現在 step を
+      完了するまで継続する。v0.6.1 以降で policy_cancel_requested 経路を追加予定。
     retry_safe_shutdown_before_retry:
-      retry の前に target の safe_shutdown を試行するか (v0.6.0 は予約フィールド、
-      未実装)
+      **v0.6.0.1 では予約フィールド (未実装)**。
+      retry の前に target の safe_shutdown を試行する設計。v0.7.0+ の SQLite
+      永続化強化と合わせて実装予定。
     """
     mode: str = "continue"
     retry: int = 0

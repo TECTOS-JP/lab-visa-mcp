@@ -89,6 +89,12 @@ class GroupExecutor:
                   非 None を返したら "理由文字列" (cancel|timeout)。
     on_progress:  進捗を runtime.current_progress に書き戻す callback。
                   渡される dict は target counts 等。
+
+    v0.6.0.1: target-level resource lock を追加。
+    同一 Group/Map Job 内部で同じ resource を共有する複数 target が
+    concurrency により同時実行されてしまう問題を解消する。
+    Job 間競合は ResourceScheduler が、Job 内 target 間競合はこの
+    target-level lock が担う、という二段構成。
     """
 
     def __init__(
@@ -99,6 +105,45 @@ class GroupExecutor:
     ) -> None:
         self._visa = visa
         self._resolve_session = session_resolver
+        # v0.6.0.1: target 単位 resource lock (Job 内 target 間排他)
+        # canonical sorted で取得することで deadlock 回避
+        self._target_locks: dict[str, asyncio.Lock] = {}
+
+    def _lock_for(self, resource: str) -> asyncio.Lock:
+        """resource ごとの target-level Lock を lazy 生成して返す"""
+        lock = self._target_locks.get(resource)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._target_locks[resource] = lock
+        return lock
+
+    async def _acquire_target_resources(self, resources: list[str]) -> list[asyncio.Lock]:
+        """target の required_resources を canonical sorted 順に取得する。
+
+        全 lock を取得できるまで待機。順序固定で deadlock 回避。
+        呼び出し側は finally で release_all() を呼ぶこと。
+        """
+        ordered = sorted(set(resources))
+        acquired: list[asyncio.Lock] = []
+        try:
+            for r in ordered:
+                lock = self._lock_for(r)
+                await lock.acquire()
+                acquired.append(lock)
+            return acquired
+        except Exception:
+            # 取得済みを解放
+            for lk in acquired:
+                lk.release()
+            raise
+
+    @staticmethod
+    def _release_target_resources(acquired: list[asyncio.Lock]) -> None:
+        for lk in acquired:
+            try:
+                lk.release()
+            except RuntimeError:
+                pass
 
     async def run(
         self,
@@ -182,6 +227,43 @@ class GroupExecutor:
                     _emit_progress()
                     return
 
+                # v0.6.0.1: target が要求する resource を Job 内 target 間で逐次化
+                # (Job 間競合は親 ResourceScheduler が、Job 内 target 間競合はこの lock が担う)
+                # 取得は canonical sorted 順で deadlock 回避。
+                acquired_locks: list[asyncio.Lock] = []
+                try:
+                    acquired_locks = await self._acquire_target_resources(
+                        target.required_resources,
+                    )
+                except asyncio.CancelledError:
+                    results[target.target_id] = TargetResult(
+                        target.target_id, "cancelled",
+                        error_class="cancelled",
+                        error_message="cancelled while acquiring target resources",
+                    )
+                    _emit_progress()
+                    return
+
+                # lock 取得後に再度 cancel / stop チェック (待っている間に状況変化)
+                if _check_cancel():
+                    self._release_target_resources(acquired_locks)
+                    results[target.target_id] = TargetResult(
+                        target.target_id, "skipped",
+                        error_class="cancelled",
+                        error_message=f"cancelled after lock acquire ({cancel_reason})",
+                    )
+                    _emit_progress()
+                    return
+                if stop_requested:
+                    self._release_target_resources(acquired_locks)
+                    results[target.target_id] = TargetResult(
+                        target.target_id, "skipped",
+                        error_class="policy_stop",
+                        error_message="未開始 target が failure_policy により skipped",
+                    )
+                    _emit_progress()
+                    return
+
                 # mark running (progress 用)
                 results[target.target_id] = TargetResult(target.target_id, "running")
                 _emit_progress()
@@ -218,6 +300,9 @@ class GroupExecutor:
                     error_class="internal",
                     error_message="no result",
                 )
+
+                # v0.6.0.1: target-level resource lock 解放
+                self._release_target_resources(acquired_locks)
 
                 # failure_policy 評価
                 _evaluate_policy()

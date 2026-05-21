@@ -609,11 +609,44 @@ class JobManager:
             )
 
         # build TargetExecution per member
+        # v0.6.0.1: 全 member の command が "query" 型であることを事前検証。
+        # write 系コマンドを start_group_query_job で実行するのは名前と挙動がずれるので拒否。
+        # write を group で扱いたいユーザは start_map_recipe_job (同 parameters) を使う。
         targets: list[TargetExecution] = []
         required_resources_set: set[str] = set()
         try:
             for alias in group.members:
                 resource = self._system_config.resolve_alias(alias) or alias
+                session = self._sessions.get_session(resource)
+                if session is None or session.definition is None:
+                    return self._record_immediate_failure(
+                        resource_name="", recipe_name=f"<group:{group_name}>",
+                        parameters={"group": group_name},
+                        error_class="not_found",
+                        summary=(
+                            f"group '{group_name}' member '{alias}' (→ {resource}) は "
+                            f"未識別です。identify_instrument / bind_definition を先に実行してください"
+                        ),
+                    )
+                cmd_def = session.definition.commands.get(command_name)
+                if cmd_def is None:
+                    return self._record_immediate_failure(
+                        resource_name="", recipe_name=f"<group:{group_name}>",
+                        parameters={"group": group_name},
+                        error_class="not_found",
+                        summary=f"member '{alias}' に command '{command_name}' が未定義",
+                    )
+                if cmd_def.type != "query":
+                    return self._record_immediate_failure(
+                        resource_name="", recipe_name=f"<group:{group_name}>",
+                        parameters={"group": group_name, "command": command_name},
+                        error_class="validation",
+                        summary=(
+                            f"start_group_query_job は query 系 command のみ許可します "
+                            f"(member '{alias}'.{command_name} type='{cmd_def.type}'). "
+                            f"write を group 実行したい場合は start_map_recipe_job を使用してください"
+                        ),
+                    )
                 plan = Plan(
                     name=f"group_query:{command_name}",
                     steps=[CommandStep(command=command_name, args=args)],
@@ -723,9 +756,20 @@ class JobManager:
                         summary=f"target {target_id}: bindings 空 (unit / bindings 未指定)",
                     )
                 # primary alias の決定
+                # v0.6.0.1: bindings が複数ある場合は primary_role 必須化 (推定の罠を防ぐ)
                 p_role = primary_role
                 if p_role is None or p_role not in bindings:
-                    # 最初の binding を primary とみなす
+                    if len(bindings) > 1:
+                        return self._record_immediate_failure(
+                            resource_name="", recipe_name=f"<map:{recipe_name}>",
+                            parameters={"recipe": recipe_name},
+                            error_class="validation",
+                            summary=(
+                                f"target {target_id}: bindings に複数の role がある場合は "
+                                f"primary_role の指定が必須です (bindings={list(bindings)})"
+                            ),
+                        )
+                    # 単一 binding なら唯一の role を primary に
                     p_role = next(iter(bindings.keys()))
                 primary_alias = bindings[p_role]
                 primary_resource = self._system_config.resolve_alias(primary_alias) or primary_alias

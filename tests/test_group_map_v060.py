@@ -536,18 +536,16 @@ async def test_start_map_recipe_job_with_bindings(tmp_path, monkeypatch):
 # =========================================================
 
 @pytest.mark.asyncio
-async def test_resource_lock_prevents_shared_resource_targets_from_overlapping(
+async def test_bus_semaphore_serializes_io_on_same_bus(
     tmp_path, monkeypatch,
 ):
-    """同じ resource を共有する複数 target が、Bus semaphore で同時実行されない
+    """[実装方針必須テスト 1: BusManager 確認]
+    BusManager が同 bus 上の I/O を逐次化することを GroupExecutor 経由で確認。
 
-    設定:
-      target s1: psu001 (GPIB0::6) と temp001 (GPIB0::1)
-      target s2: psu001 (GPIB0::6) と temp001 (GPIB0::1)  ← 同じ resource
-    GPIB0 は max_concurrency=1 なので、I/O は逐次化される。
-
-    本テストは "VisaManager + BusManager が同 bus 上の resource を逐次化する" ことを
-    GroupExecutor 経由で確認する。
+    v0.6.0.1 改名: 旧 test_resource_lock_prevents_shared_resource_targets_from_overlapping。
+    旧名は "target 間の resource overlap" を示唆していたが、実態は bus semaphore による
+    I/O 逐次化の確認だったため改名。target 間 lock の真の効果は
+    test_shared_resource_targets_serialized_during_wait で別途確認する。
     """
     monkeypatch.setenv("VISA_MCP_SAFETY_MODE", "permissive")
 

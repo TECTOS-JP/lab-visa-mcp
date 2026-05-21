@@ -37,7 +37,15 @@ class BusManager:
         self._acquired_counts: dict[str, int] = {}
 
     def set_system_config(self, system_config: SystemConfig) -> None:
-        """ランタイムで system_config をスワップ (reload 対応)"""
+        """ランタイムで system_config をスワップ (reload 対応)
+
+        **注意 (v0.6.0.1)**: 既存セマフォは保持される (リファレンスを抱えている
+        呼び出し元があるため)。よって reload 後に bus の max_concurrency を
+        変更しても、**既存 bus 名のセマフォは古い並列数のまま残る**。
+        変更を確実に反映するにはサーバ再起動が必要。
+        新規 bus 名 (まだ acquire されていないもの) は次回 acquire 時に
+        新しい設定で生成される。
+        """
         # 既存セマフォは保持 (リファレンスを抱えている呼び出し元があるため)
         self._system_config = system_config
 

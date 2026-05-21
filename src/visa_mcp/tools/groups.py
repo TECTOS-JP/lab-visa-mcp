@@ -157,7 +157,10 @@ def register_tools(mcp: FastMCP, job_mgr: JobManager) -> None:
         concurrency: 同時 active target 数
         failure_policy: {"mode": "continue"|"stop_on_first_error"|"stop_if_failure_rate_exceeds",
                          "retry": 0, "stop_if_failure_rate_exceeds": 0.5}
-        primary_role: recipe を取得する主 instrument の役割名。空なら最初の binding を使う
+        primary_role: recipe を取得する主 instrument の役割名。
+          - bindings (unit と merge 後) に 1 つしか role がなければ自動推定
+          - **bindings に複数 role がある場合は必須** (v0.6.0.1)。
+            未指定だと validation error を返す (推定の罠を防ぐため)
 
         進捗は get_job_status の data.progress (target counts) を参照。
         完了後は get_job_result の data.result.results (入力 target_id 順) と

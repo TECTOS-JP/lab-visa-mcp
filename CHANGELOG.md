@@ -1,5 +1,83 @@
 # 変更履歴
 
+## v0.6.0.1 — 外部レビュー対応 (P0/P1)
+
+v0.6.0 公開後の外部レビューで指摘された **同一 Map Job 内部の target 間 resource 競合**
+を含む P0 三件 + P1 数件への対応。
+
+### P0
+
+- **同一 Map Job 内部の target 間 resource lock を追加 (最重要)**
+  - 旧 v0.6.0: 親 Map Job が全 resource を `ResourceScheduler` で一括占有していたが、
+    Job 内部の target 同士で同じ resource を共有するケース (例: 設定ミスで
+    sample001/sample002 が両方とも psu001 を使う) では、`wait` 中に target2 が
+    target1 の電圧設定を上書きする恐れがあった。VisaManager の resource lock は
+    I/O 単位の逐次化のみで、target 全体としての条件保持は守れていなかった。
+  - 新: `GroupExecutor` 内に `_target_locks: dict[str, asyncio.Lock]` を新設。
+    target 実行直前に `required_resources` を canonical sorted 順で acquire し、
+    target 終了時に release。これにより:
+    - Job 間競合 = ResourceScheduler が担う
+    - Job 内 target 間競合 = GroupExecutor の target-level lock が担う
+    の二段構成が完成。canonical sorted 取得で deadlock 回避。
+- **テスト名のズレを修正**
+  - 旧 `test_resource_lock_prevents_shared_resource_targets_from_overlapping` →
+    新 `test_bus_semaphore_serializes_io_on_same_bus` (実態は BusManager の I/O 逐次化)
+  - 新規 `test_shared_resource_targets_serialized_during_wait` を追加:
+    psu001 を共有する 2 target で `set_voltage → wait 0.15s → measure_voltage` を
+    concurrency=2 で実行し、target ごとの開始-終了区間が overlap しないことを確認
+  - 対照: `test_disjoint_resource_targets_run_in_parallel` で異なる resource は
+    並列実行されることを確認 (lock が壊れていない確認)
+
+### P1
+
+- **`primary_role` を複数 bindings 時は必須化**
+  - 旧: bindings が複数 role を持つ場合、最初の binding を primary と推定
+    していたが、エージェントが渡す JSON の dict 順序は曖昧で、温度計が
+    primary になる等の事故の恐れがあった
+  - 新: bindings が 2 以上の role を持つ場合は `primary_role` 未指定で
+    validation error。単一 role なら従来通り自動推定
+- **`start_group_query_job` で write 系 command を拒否**
+  - 旧: command type が write でも素通り (名前と挙動がずれる)
+  - 新: target 構築時に各 member の `command.type` を確認し、`query` 以外は
+    validation error。メッセージで `start_map_recipe_job` への誘導も含む。
+    member 機器が未識別ならその時点で `not_found` エラー (より早い検出)
+- **`cancel_running_on_policy_stop` を予約フィールドとして明記**
+  - `FailurePolicy` の docstring で「v0.6.0.1 では未実装。stop_requested は
+    未開始 target を skipped にするのみ。実行中 target の強制 cancel は
+    v0.6.1 で `policy_cancel_requested` 経路として追加予定」と明記
+- **BusManager.set_system_config の reload 仕様明記**
+  - 既存 semaphore は保持されるため、reload 後の `max_concurrency` 変更は
+    既存 bus 名のセマフォには反映されない (要サーバ再起動)。docstring で明示
+
+### P0/P1 で見送った項目 (v0.7.0 以降)
+
+- **Map Job 全体の resource 一括 lock → target 単位 lock への移行**
+  - 現状 v0.6.0.1 は親 Job が全 target の全 resource を ResourceScheduler に
+    渡す保守的設計。`concurrency=10` で 100 targets でも 100 resource を確保
+  - スケール性は劣るが安全性は高い。target_runs テーブル等の永続化と合わせて
+    v0.7.0 で target 単位 acquire/release に変更予定
+- **`stop_on_first_error` で全 task 先起動 → worker pool 化**: v0.6.0.1 では
+  100 targets 程度なら問題なし。1000+ で worker pool 検討
+- **safe_eval_condition の `**` 禁止 / AST 上限**: v0.5.1.1 から引き続き保留
+
+### テスト (6 件追加、合計 278 passed)
+
+`tests/test_group_map_v0601.py`:
+- `test_shared_resource_targets_serialized_during_wait` (**P0 最重要**)
+- `test_disjoint_resource_targets_run_in_parallel`
+- `test_map_recipe_requires_primary_role_when_multiple_bindings`
+- `test_map_recipe_single_binding_auto_primary`
+- `test_start_group_query_job_rejects_write_command`
+- `test_start_group_query_job_accepts_query_command`
+
+### 後方互換
+
+既存 25 MCP ツール / v0.6.0 YAML はすべて不変。v0.6.0 で「動いていた」
+パターン (target が disjoint resource で primary_role 明示 or 単一 binding) は
+v0.6.0.1 でも動く。primary_role 必須化は明らかな曖昧パターンの reject のみ。
+
+---
+
 ## v0.6.0 — Group / Map MVP
 
 v0.5 系の「単一 Job を安全に長時間実行する」段階から、
