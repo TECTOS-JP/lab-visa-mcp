@@ -171,7 +171,8 @@ async def test_wait_for_condition_immediate_success():
     )
     assert res["success"] is True
     assert res["last_value"] == 90.0
-    assert res["samples_taken"] == 1
+    assert res["poll_count"] == 1
+    assert res["valid_sample_count"] == 1
 
 
 @pytest.mark.asyncio
@@ -584,7 +585,8 @@ commands:
         assert prog is not None
         assert prog["step_type"] == "wait_for_condition"
         assert "elapsed_s" in prog
-        assert "sample_count" in prog
+        assert "poll_count" in prog
+        assert "valid_sample_count" in prog
         assert prog["last_value"] == 50.0
         # cleanup
         await mgr.cancel(rec.job_id, CancelMode.IMMEDIATE, timeout_s=5)

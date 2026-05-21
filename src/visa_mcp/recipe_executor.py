@@ -172,6 +172,30 @@ async def execute_plan(
 
     step_results: list[dict] = []
 
+    # v0.5.1.1: polling 系 step は同期 execute_recipe では実行不可。
+    # LLM が誤って execute_recipe を選んだ場合に分かりやすく Job 化を促す。
+    for s in plan.steps:
+        if isinstance(s, (WaitUntilStep, WaitForConditionStep, WaitForStableStep)):
+            return {
+                "success": False,
+                "recipe": recipe_name or plan.name,
+                "error": "AsyncStepRequiresJob",
+                "message": (
+                    "wait_until / wait_for_condition / wait_for_stable を含む recipe は "
+                    "execute_recipe では実行できません。**start_recipe_job** を使ってください。"
+                    " (進捗は get_job_status、完了結果は get_job_result で取得)"
+                ),
+                "async_step_type": getattr(s, "type", "?"),
+                "recommended_action": {
+                    "tool": "start_recipe_job",
+                    "args": {
+                        "resource_name": "<同じ resource>",
+                        "recipe_name": recipe_name or plan.name,
+                    },
+                },
+                "steps_executed": [],
+            }
+
     for idx, step in enumerate(plan.steps):
         if isinstance(step, WaitStep):
             result = await execute_wait_step(step)

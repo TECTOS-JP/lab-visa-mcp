@@ -31,7 +31,7 @@ def register_tools(mcp: FastMCP, job_mgr: JobManager) -> None:
     @mcp.tool()
     async def start_wait_job(
         wait_type: str,
-        params: dict = {},
+        params: dict | None = None,
         owner: str = "",
         job_timeout_s: float = 0.0,
         queue_policy: str = "queue",
@@ -95,10 +95,11 @@ def register_tools(mcp: FastMCP, job_mgr: JobManager) -> None:
                 )],
             )
 
+        params = params or {}
         try:
             rec = await job_mgr.start_wait_job(
                 wait_type=wait_type,
-                params=params or {},
+                params=params,
                 owner=owner,
                 job_timeout_s=(job_timeout_s if job_timeout_s > 0 else None),
                 queue_policy=queue_policy,

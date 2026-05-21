@@ -1,5 +1,74 @@
 # 変更履歴
 
+## v0.5.1.1 — 外部レビュー対応 (P0/P1)
+
+v0.5.1 公開後の外部レビューで指摘された P0 二件 + P1 四件への対応。
+コード本体の機能は v0.5.1 で完成しているが、エージェント向け UX と
+API 正確性を整える。
+
+### P0
+
+- **`wait_for_condition` 側にも `polling_safe_warning` を入れる**
+  - 旧: `wait_for_stable` のみ `polling_safe=False` を警告していた
+  - 新: `wait_for_condition` も対象 command の `polling_safe` を確認し、
+    progress と結果 dict 双方に `polling_safe_warning` を含める
+  - 副作用のある `READ?` / `MEAS?` を condition で繰り返し呼ぶリスクは
+    stable と同等なため、警告対象も揃える
+- **同期 `execute_recipe` で polling step を踏んだら `AsyncStepRequiresJob`**
+  - 旧: `UnsupportedStepType` で内容が分からないまま失敗
+  - 新: polling 系 step (`wait_until` / `wait_for_condition` / `wait_for_stable`)
+    を含む recipe を `execute_recipe` で実行しようとした場合、即座に明確な
+    誘導エラーを返す
+    ```json
+    {
+      "success": false,
+      "error": "AsyncStepRequiresJob",
+      "message": "... execute_recipe では実行できません。start_recipe_job を使ってください ...",
+      "recommended_action": { "tool": "start_recipe_job", "args": {...} }
+    }
+    ```
+  - 実機 write は 1 つも実行されずに即時 reject (副作用なし)
+
+### P1
+
+- **`wait_until` の naive timestamp を拒否**
+  - 旧: timezone 無し timestamp を UTC として扱う (日本時間 15:00 を渡したつもりが
+    UTC 15:00 として扱われる事故の恐れ)
+  - 新: `TimezoneRequired` エラーで拒否、`+09:00` 形式または `Z` 形式での
+    明示指定を要求するメッセージ
+  - 実験現場のヒューマンエラー (時差ミス) を防止
+- **`start_wait_job` の `params: dict = {}` を None default に**
+  - mutable default 引数の慣用回避
+- **`sample_count` を `poll_count` / `valid_sample_count` / `consecutive_errors` に分離**
+  - 旧: 「poll 試行数」と「有効サンプル数」が混在していた
+  - 新:
+    - `poll_count`: 試行数 (エラー含む)
+    - `valid_sample_count`: 有効な数値を得た成功 poll 数
+    - `consecutive_errors`: 現在の連続失敗数
+  - `wait_for_stable` の安定判定に使われる有効サンプル数が明示的に分かる
+  - **後方互換**: 旧 `samples_taken` / `sample_count` キーは v0.5.1.1 で削除
+    (v0.5.1 リリース後 1 日以内のため影響範囲は限定的)
+
+### 検討して見送った項目
+
+- **`safe_eval_condition` の `**` 禁止 / AST 上限**: v0.6.0 前に再検討
+  (現状 `condition_expr` は LLM が直接生成しないため緊急度低)
+- **`polling_safe` を strict モードで block**: 既存 YAML を破壊するため
+  v0.6.0 で `state_query` と合わせて整理
+
+### テスト
+
+`tests/test_polling_wait_v0511.py` に 6 件追加 (合計 **251 passed**)。
+
+- `test_wait_for_condition_emits_polling_safe_warning`
+- `test_wait_for_condition_no_warning_when_polling_safe`
+- `test_execute_recipe_rejects_polling_step` (実機 write 呼ばれない確認込み)
+- `test_wait_until_rejects_naive_timestamp`
+- `test_wait_until_accepts_tz_aware_timestamp_already_passed`
+- `test_poll_count_and_valid_sample_count_differ_on_errors`
+
+---
+
 ## v0.5.1 — Polling wait (条件待機 / 安定待機 / 絶対時刻待機) + start_wait_job
 
 v0.5.0 系で導入した Job MVP を、**条件待機**できるレベルへ拡張。

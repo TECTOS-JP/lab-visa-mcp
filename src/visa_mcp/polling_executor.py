@@ -219,8 +219,19 @@ async def execute_wait_until(
                 "step_type": "wait_until", "success": False,
                 "error": "InvalidTimestamp", "message": str(e),
             }
+        # v0.5.1.1: naive timestamp は危険 (UTC として扱われると実験現場で時差ミス)
+        # → 拒否し、timezone 付きで指定するよう誘導
         if target_dt.tzinfo is None:
-            target_dt = target_dt.replace(tzinfo=timezone.utc)
+            return {
+                "step_type": "wait_until", "success": False,
+                "error": "TimezoneRequired",
+                "message": (
+                    f"wait_until.timestamp は timezone 付き ISO8601 で指定してください。"
+                    f"例: '2026-05-22T15:00:00+09:00' (日本時間) "
+                    f"または '2026-05-22T06:00:00+00:00' / '...Z' (UTC)。"
+                    f"naive timestamp ({step.timestamp!r}) は曖昧なため拒否します。"
+                ),
+            }
         now = datetime.now(timezone.utc)
         delta = (target_dt - now).total_seconds()
         if delta < 0:
@@ -284,14 +295,25 @@ async def execute_wait_for_condition(
             "message": f"instrument '{step.instrument}' is not identified",
         }
 
+    # v0.5.1.1: polling_safe 警告 (wait_for_stable と同様に condition 側でも)
+    cmd_def = target_session.definition.commands.get(step.command)
+    polling_safe_warning: str | None = None
+    if cmd_def is not None and not cmd_def.polling_safe:
+        polling_safe_warning = (
+            f"command '{step.command}' has polling_safe=False; "
+            f"確認: 副作用のある READ?/MEAS? を polling する可能性"
+        )
+
     start = time.monotonic()
     deadline = start + step.timeout_s
     consecutive_errors = 0
     last_value: float | None = None
 
-    sample_count = 0
+    # v0.5.1.1: sample_count を poll_count / valid_sample_count / consecutive_errors に分離
+    poll_count = 0           # poll 試行数 (エラー含む)
+    valid_sample_count = 0   # 有効な数値を得た成功 poll 数
+
     while True:
-        # 1 polling (retry_on_error 込み)
         attempt = 0
         value: float | None = None
         error_kind: str | None = None
@@ -303,9 +325,12 @@ async def execute_wait_for_condition(
                     "success": False,
                     ("interrupted_by_" + reason): True,
                     "error": reason,
-                    "samples_taken": sample_count,
+                    "poll_count": poll_count,
+                    "valid_sample_count": valid_sample_count,
+                    "consecutive_errors": consecutive_errors,
                     "elapsed_s": time.monotonic() - start,
                     "last_value": last_value,
+                    "polling_safe_warning": polling_safe_warning,
                 }
             value, _raw, _parsed, error_kind = await _do_one_poll(
                 visa, target_session, step.command, step.args,
@@ -315,7 +340,7 @@ async def execute_wait_for_condition(
                 break
             attempt += 1
 
-        sample_count += 1
+        poll_count += 1
         if error_kind is not None:
             consecutive_errors += 1
             if consecutive_errors >= step.max_consecutive_errors:
@@ -328,14 +353,17 @@ async def execute_wait_for_condition(
                         f"(>= max_consecutive_errors={step.max_consecutive_errors})"
                     ),
                     "last_error_kind": error_kind,
-                    "samples_taken": sample_count,
+                    "poll_count": poll_count,
+                    "valid_sample_count": valid_sample_count,
+                    "consecutive_errors": consecutive_errors,
                     "elapsed_s": time.monotonic() - start,
+                    "polling_safe_warning": polling_safe_warning,
                 }
         else:
             consecutive_errors = 0
             last_value = value
+            valid_sample_count += 1
 
-            # 条件評価
             try:
                 ok = safe_eval_condition(step.condition_expr, {"value": value})
             except ConditionError as e:
@@ -345,6 +373,7 @@ async def execute_wait_for_condition(
                     "error": "ConditionError",
                     "message": str(e),
                     "elapsed_s": time.monotonic() - start,
+                    "polling_safe_warning": polling_safe_warning,
                 }
             if on_progress is not None:
                 on_progress({
@@ -353,22 +382,27 @@ async def execute_wait_for_condition(
                     "instrument": step.instrument,
                     "elapsed_s": time.monotonic() - start,
                     "timeout_remaining_s": max(0.0, deadline - time.monotonic()),
-                    "sample_count": sample_count,
+                    "poll_count": poll_count,
+                    "valid_sample_count": valid_sample_count,
+                    "consecutive_errors": consecutive_errors,
                     "last_value": last_value,
                     "condition_met": ok,
                     "next_poll_in_s": step.interval_s,
+                    "polling_safe_warning": polling_safe_warning,
                 })
             if ok:
                 return {
                     "step_type": "wait_for_condition",
                     "success": True,
-                    "samples_taken": sample_count,
+                    "poll_count": poll_count,
+                    "valid_sample_count": valid_sample_count,
                     "elapsed_s": time.monotonic() - start,
                     "last_value": last_value,
                     "condition_expr": step.condition_expr,
+                    "polling_safe_warning": polling_safe_warning,
                 }
 
-        # timeout チェック (次 poll を待つ前)
+        # timeout
         now = time.monotonic()
         if now >= deadline:
             return {
@@ -379,12 +413,13 @@ async def execute_wait_for_condition(
                     f"timeout_s={step.timeout_s} を超過、条件未達成 "
                     f"(last_value={last_value})"
                 ),
-                "samples_taken": sample_count,
+                "poll_count": poll_count,
+                "valid_sample_count": valid_sample_count,
                 "elapsed_s": now - start,
                 "last_value": last_value,
+                "polling_safe_warning": polling_safe_warning,
             }
 
-        # interval 待ち (slice cancel 可)
         def _tick(remaining: float) -> None:
             if on_progress is not None:
                 on_progress({
@@ -393,9 +428,12 @@ async def execute_wait_for_condition(
                     "instrument": step.instrument,
                     "elapsed_s": time.monotonic() - start,
                     "timeout_remaining_s": max(0.0, deadline - time.monotonic()),
-                    "sample_count": sample_count,
+                    "poll_count": poll_count,
+                    "valid_sample_count": valid_sample_count,
+                    "consecutive_errors": consecutive_errors,
                     "last_value": last_value,
                     "next_poll_in_s": remaining,
+                    "polling_safe_warning": polling_safe_warning,
                 })
 
         reason = await _sleep_sliced_until_next_poll(
@@ -408,9 +446,11 @@ async def execute_wait_for_condition(
                 "success": False,
                 ("interrupted_by_" + reason): True,
                 "error": reason,
-                "samples_taken": sample_count,
+                "poll_count": poll_count,
+                "valid_sample_count": valid_sample_count,
                 "elapsed_s": time.monotonic() - start,
                 "last_value": last_value,
+                "polling_safe_warning": polling_safe_warning,
             }
 
 
@@ -482,12 +522,13 @@ async def execute_wait_for_stable(
     deadline = start + step.timeout_s
     samples: list[tuple[float, float]] = []
     consecutive_errors = 0
-    sample_count = 0
+    # v0.5.1.1: poll_count (試行数) と valid_sample_count (有効サンプル数) を分離
+    poll_count = 0
+    valid_sample_count = 0
     last_value: float | None = None
     last_delta: float | None = None
 
     while True:
-        # 1 polling (retry)
         attempt = 0
         value: float | None = None
         error_kind: str | None = None
@@ -499,10 +540,13 @@ async def execute_wait_for_stable(
                     "success": False,
                     ("interrupted_by_" + reason): True,
                     "error": reason,
-                    "samples_taken": sample_count,
+                    "poll_count": poll_count,
+                    "valid_sample_count": valid_sample_count,
+                    "consecutive_errors": consecutive_errors,
                     "elapsed_s": time.monotonic() - start,
                     "last_value": last_value,
                     "last_delta": last_delta,
+                    "polling_safe_warning": polling_safe_warning,
                 }
             value, _raw, _parsed, error_kind = await _do_one_poll(
                 visa, target_session, step.command, step.args,
@@ -512,7 +556,7 @@ async def execute_wait_for_stable(
                 break
             attempt += 1
 
-        sample_count += 1
+        poll_count += 1
         if error_kind is not None:
             consecutive_errors += 1
             if consecutive_errors >= step.max_consecutive_errors:
@@ -525,12 +569,16 @@ async def execute_wait_for_stable(
                         f"(>= max_consecutive_errors={step.max_consecutive_errors})"
                     ),
                     "last_error_kind": error_kind,
-                    "samples_taken": sample_count,
+                    "poll_count": poll_count,
+                    "valid_sample_count": valid_sample_count,
+                    "consecutive_errors": consecutive_errors,
                     "elapsed_s": time.monotonic() - start,
+                    "polling_safe_warning": polling_safe_warning,
                 }
         else:
             consecutive_errors = 0
             last_value = value
+            valid_sample_count += 1
             t = time.monotonic() - start
             samples.append((t, value))  # type: ignore[arg-type]
 
@@ -556,7 +604,9 @@ async def execute_wait_for_stable(
                     "instrument": step.instrument,
                     "elapsed_s": t,
                     "timeout_remaining_s": max(0.0, deadline - time.monotonic()),
-                    "sample_count": sample_count,
+                    "poll_count": poll_count,
+                    "valid_sample_count": valid_sample_count,
+                    "consecutive_errors": consecutive_errors,
                     "last_value": last_value,
                     "current_delta": delta,
                     "tolerance": step.tolerance,
@@ -569,7 +619,8 @@ async def execute_wait_for_stable(
                 return {
                     "step_type": "wait_for_stable",
                     "success": True,
-                    "samples_taken": sample_count,
+                    "poll_count": poll_count,
+                    "valid_sample_count": valid_sample_count,
                     "elapsed_s": t,
                     "last_value": last_value,
                     "final_delta": delta,
@@ -578,7 +629,6 @@ async def execute_wait_for_stable(
                     "polling_safe_warning": polling_safe_warning,
                 }
 
-        # timeout check
         now = time.monotonic()
         if now >= deadline:
             return {
@@ -589,10 +639,12 @@ async def execute_wait_for_stable(
                     f"timeout_s={step.timeout_s} を超過、安定条件未達成 "
                     f"(last_value={last_value}, last_delta={last_delta})"
                 ),
-                "samples_taken": sample_count,
+                "poll_count": poll_count,
+                "valid_sample_count": valid_sample_count,
                 "elapsed_s": now - start,
                 "last_value": last_value,
                 "last_delta": last_delta,
+                "polling_safe_warning": polling_safe_warning,
             }
 
         def _tick(remaining: float) -> None:
@@ -603,7 +655,9 @@ async def execute_wait_for_stable(
                     "instrument": step.instrument,
                     "elapsed_s": time.monotonic() - start,
                     "timeout_remaining_s": max(0.0, deadline - time.monotonic()),
-                    "sample_count": sample_count,
+                    "poll_count": poll_count,
+                    "valid_sample_count": valid_sample_count,
+                    "consecutive_errors": consecutive_errors,
                     "last_value": last_value,
                     "current_delta": last_delta,
                     "next_poll_in_s": remaining,
@@ -620,8 +674,10 @@ async def execute_wait_for_stable(
                 "success": False,
                 ("interrupted_by_" + reason): True,
                 "error": reason,
-                "samples_taken": sample_count,
+                "poll_count": poll_count,
+                "valid_sample_count": valid_sample_count,
                 "elapsed_s": time.monotonic() - start,
                 "last_value": last_value,
                 "last_delta": last_delta,
+                "polling_safe_warning": polling_safe_warning,
             }
