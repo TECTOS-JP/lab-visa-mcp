@@ -1,5 +1,55 @@
 # 変更履歴
 
+## v0.5.0-rc1 — 内部 IR + wait step + 標準レスポンス形式
+
+実験実行基盤 (v0.5.0 "Job MVP") に向けた最初の rc。後方互換を維持しながら基礎レイヤーを導入する。
+
+### 新規モジュール
+
+- **`visa_mcp.experiment_ir`** ── 内部 Intermediate Representation
+  - `CommandStep` / `WaitStep` (Pydantic discriminated union)
+  - `Plan` (Step のシーケンス + parameters + metadata)
+  - v0.8.0 のリポジトリ分割時に `experiment_mcp/ir/` へそのまま移動できるよう疎結合設計
+- **`visa_mcp.response_envelope`** ── v0.5.0+ 新規ツール用の標準レスポンス形式
+  - `make_envelope(status, data, errors, ...)`、`make_error(error_class, ...)`
+  - top-level `status`: `ok / error / partial_failure / running`
+
+### 追加機能
+
+- **Recipe に `wait` step タイプを追加** (後方互換)
+  ```yaml
+  recipes:
+    set_and_settle:
+      steps:
+        - { command: "set_voltage", args: { voltage: "$v" } }
+        - wait: { seconds: "$settle_s" }       # 新規
+        - { command: "measure_voltage" }
+  ```
+  `wait.seconds` には数値リテラルまたは `$var` 形式の式が指定可能。
+- **`recipe_executor` を内部 IR ベースに refactor**
+  - `recipe_to_plan(recipe, variables)` で RecipeDefinition → IR Plan に変換
+  - `execute_plan(visa, session, plan)` で IR Plan を実行
+  - 既存 `execute_recipe` API の戻り値形式は v0.3.0/v0.4.x と同一 (後方互換)
+
+### サンプル
+
+- `examples/instruments/kikusui_pmx35_3a.yaml` に `set_voltage_and_measure_after_settling` recipe 追加 (wait step 使用例)
+
+### テスト
+
+- 149 件全パス (v0.4.1 の 115 件から +34 件)
+  - `test_experiment_ir.py` (10 件): Step / Plan の作成・シリアライズ
+  - `test_response_envelope.py` (12 件): envelope / error 生成
+  - `test_recipe_wait_step.py` (11 件): RecipeStep スキーマ + recipe_to_plan + 実行
+- 実機検証: PMX35-3A で wait 含む 9 ステップ recipe が 1.5 秒待機を含めて 1.57 秒で完走、実測 5.003V
+
+### 移行ノート
+
+- 既存 v0.4.1 の YAML / API はすべて変更なしで動作 (後方互換)
+- 新規ツールはまだ追加されていない (v0.5.0-rc2 で Job manager + MCP ツール 5 個を追加予定)
+
+---
+
 ## v0.4.1 — 危険キーワード検出の堅牢化
 
 外部レビュー指摘の残課題を対処したパッチリリース。

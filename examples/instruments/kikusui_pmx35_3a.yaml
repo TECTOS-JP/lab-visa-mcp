@@ -179,6 +179,26 @@ recipes:
       - { command: "measure_voltage" }
       - { command: "measure_current" }
 
+  # v0.5.0-rc1: wait step を使った settling 付き測定の例
+  set_voltage_and_measure_after_settling:
+    description: |
+      電圧設定 → 指定秒数待機 (出力安定化) → 実測値読み取り。
+      Settling 時間は target_v / 負荷条件により調整可能。
+    parameters:
+      - { name: "target_v", type: "float", description: "目標出力電圧 (V)" }
+      - { name: "current_limit", type: "float", description: "最大電流 (A)" }
+      - { name: "settle_s", type: "float", description: "settling 待機秒数", default: 2 }
+    steps:
+      - { command: "reset" }
+      - { command: "set_voltage_protection", args: { voltage: "$target_v * 1.1 + 0.5" } }
+      - { command: "set_current_protection", args: { current: "$current_limit * 1.1 + 0.05" } }
+      - { command: "set_voltage", args: { voltage: "$target_v" } }
+      - { command: "set_current", args: { current: "$current_limit" } }
+      - { command: "set_output", args: { state: "ON" } }
+      - wait: { seconds: "$settle_s" }
+      - { command: "measure_voltage" }
+      - { command: "measure_current" }
+
 commands:
 
   # ====================================================

@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Any, Literal
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class ParameterDefinition(BaseModel):
@@ -119,11 +119,67 @@ class ResponseFormat(BaseModel):
 # ===== Recipe / 物理インタフェース / 動作状態 (v0.3.0) =====
 
 class RecipeStep(BaseModel):
-    """recipe の 1 ステップ"""
-    command: str                            # YAML commands のキーを参照
+    """
+    recipe の 1 ステップ。
+
+    v0.5.0-rc1 から下記 2 種類のステップ型をサポート:
+    - **command step**: `command` を指定 (従来通り)、機器コマンドを実行
+    - **wait step**: `wait: { seconds: N }` を指定、N 秒待機 (新規)
+
+    どちらか一方を必ず指定する (両方指定や両方未指定はエラー)。
+
+    YAML 例:
+        steps:
+          - { command: "set_voltage", args: { voltage: 5 } }
+          - wait: { seconds: 60 }
+          - { command: "measure_voltage" }
+    """
+    # command step フィールド (従来)
+    command: str | None = None              # YAML commands のキーを参照
     args: dict[str, Any] = Field(default_factory=dict)
     # args の値は文字列の場合 "$varname" や "$var * 1.1" のような式評価が可能
+    result_as: str | None = None            # 後続ステップから ${steps.<result_as>} で参照 (v0.6.0+ で実装)
     description: str = ""
+    # wait step フィールド (v0.5.0-rc1)
+    wait: dict[str, Any] | None = None      # 例: {"seconds": 60}
+
+    @model_validator(mode="after")
+    def _exactly_one_step_type(self) -> "RecipeStep":
+        has_command = self.command is not None and self.command != ""
+        has_wait = self.wait is not None
+        if has_command and has_wait:
+            raise ValueError(
+                "RecipeStep には command と wait の両方を指定できません (どちらか一方のみ)"
+            )
+        if not has_command and not has_wait:
+            raise ValueError(
+                "RecipeStep には command または wait のいずれかを指定する必要があります"
+            )
+        # wait の中身を最小限検証
+        # seconds は数値リテラル、または "$var" / "$var * 1.1" 形式の式文字列を許容。
+        # 式の場合の実値検証は recipe_executor.recipe_to_plan で式評価時に行う。
+        if has_wait:
+            if "seconds" not in self.wait:
+                raise ValueError("wait step には seconds が必須です")
+            sec = self.wait["seconds"]
+            if isinstance(sec, str):
+                if not sec.startswith("$"):
+                    raise ValueError(
+                        f"wait.seconds は数値、または '$' で始まる式文字列である必要があります: {sec!r}"
+                    )
+            else:
+                try:
+                    sec_f = float(sec)
+                    if sec_f < 0:
+                        raise ValueError("wait.seconds は 0 以上である必要があります")
+                except (TypeError, ValueError) as e:
+                    raise ValueError(f"wait.seconds は数値である必要があります: {e}")
+        return self
+
+    @property
+    def step_type(self) -> str:
+        """このステップが command か wait かを返す (実行エンジン用)。"""
+        return "wait" if self.wait is not None else "command"
 
 
 class RecipeDefinition(BaseModel):
