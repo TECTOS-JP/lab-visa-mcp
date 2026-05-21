@@ -163,6 +163,7 @@ def register_tools(mcp: FastMCP, job_mgr: JobManager) -> None:
         override_safety: bool = False,
         override_reason: str = "",
         job_timeout_s: float = 0.0,
+        queue_policy: str = "queue",
     ) -> dict:
         """
         Recipe をバックグラウンド Job として登録し、即座に job_id を返す。
@@ -176,7 +177,23 @@ def register_tools(mcp: FastMCP, job_mgr: JobManager) -> None:
         override_reason: override 理由 (override_safety=True 時必須)
         job_timeout_s: Job 全体の制限秒数。0 または未指定なら 24 時間。
                        経過すると Job は自動で TIMEOUT 状態に遷移する。
+        queue_policy: "queue" (デフォルト、busy 時は queued で順番待ち) /
+                      "reject_if_busy" (busy 時は failed、error_class='blocked')
+
+        返り値の data.scheduling フィールドに、scheduler の状態を含む:
+          - immediate_start: True なら enqueue 時点で即実行可能だった
+          - blocked_by_job: queue 待ち中の場合の blocker job_id
+          - queue_position: queue 内位置 (即実行なら -1)
         """
+        if queue_policy not in ("queue", "reject_if_busy"):
+            return make_envelope(
+                "error",
+                errors=[make_error(
+                    "validation",
+                    f"queue_policy は 'queue' / 'reject_if_busy' のいずれか: {queue_policy}",
+                    recoverable=False,
+                )],
+            )
         try:
             rec = await job_mgr.start_recipe_job(
                 resource_name, recipe_name, parameters,
@@ -184,6 +201,7 @@ def register_tools(mcp: FastMCP, job_mgr: JobManager) -> None:
                 override_safety=override_safety,
                 override_reason=override_reason,
                 job_timeout_s=(job_timeout_s if job_timeout_s > 0 else None),
+                queue_policy=queue_policy,
             )
         except Exception as e:
             logger.exception("start_recipe_job 失敗")
@@ -192,15 +210,30 @@ def register_tools(mcp: FastMCP, job_mgr: JobManager) -> None:
                 errors=[make_error("internal", str(e), recoverable=False)],
             )
 
+        data = {
+            "job_id": rec.job_id,
+            "status": rec.status.value,
+            "resource_name": rec.resource_name,
+            "recipe": rec.recipe,
+            "created_at": rec.created_at,
+        }
+        # v0.5.0.4: scheduling 情報を embedded
+        try:
+            scheduling = await job_mgr.scheduler.get_scheduling_info(rec.job_id)
+            scheduling["queue_policy"] = queue_policy
+            data["scheduling"] = scheduling
+        except Exception:
+            # scheduler 未登録 (validation/recipe not_found で failed の場合等)
+            data["scheduling"] = {
+                "immediate_start": False,
+                "blocked_by_job": None,
+                "queue_position": -1,
+                "queue_policy": queue_policy,
+            }
+
         return make_envelope(
             "ok" if rec.status != JobStatus.FAILED else "error",
-            data={
-                "job_id": rec.job_id,
-                "status": rec.status.value,
-                "resource_name": rec.resource_name,
-                "recipe": rec.recipe,
-                "created_at": rec.created_at,
-            },
+            data=data,
             errors=([make_error(
                 rec.error_class or "validation",
                 rec.last_step_summary or "failed",

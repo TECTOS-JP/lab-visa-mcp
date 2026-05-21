@@ -646,13 +646,14 @@ class JobManager:
         """cancel 要求を実際に実行 (safe_shutdown なら shutdown シーケンス)"""
         job_id = rec.job_id
 
+        # v0.5.0.4: safe_shutdown は構造化結果 (dict) を返す
+        shutdown_info: dict | None = None
         if mode is CancelMode.SAFE_SHUTDOWN:
-            # YAML の safe_shutdown (instrument_def の同名フィールドが将来追加される予定)
-            # v0.5.0-rc2 では汎用的に "set_output OFF + set_voltage 0" を試みる
-            shutdown_summary = await self._best_effort_safe_shutdown(session)
+            shutdown_info = await self._best_effort_safe_shutdown(session)
             step_results.append({
                 "step": -1, "step_type": "safe_shutdown",
-                "summary": shutdown_summary, "success": True,
+                "shutdown": shutdown_info,
+                "success": bool(shutdown_info.get("success") or not shutdown_info.get("attempted")),
             })
 
         # CANCELLED への遷移は CANCELLING 経由が必要。途中で cancel 検出された場合は
@@ -664,11 +665,16 @@ class JobManager:
         self._store.transition_status(
             job_id, JobStatus.CANCELLED,
             error_class="cancelled",
-            last_step_summary=f"cancelled ({mode.value})",
+            last_step_summary=(
+                f"cancelled ({mode.value})"
+                + (f" shutdown_success={shutdown_info.get('success')}" if shutdown_info else "")
+            ),
             result={
                 "success": False, "recipe": rec.recipe,
                 "steps_executed": step_results,
                 "cancelled": True, "cancel_mode": mode.value,
+                # v0.5.0.4: safe_shutdown サマリを構造化付与
+                "safe_shutdown": shutdown_info if shutdown_info is not None else None,
             },
         )
         return JobStatus.CANCELLED
@@ -692,18 +698,39 @@ class JobManager:
             },
         )
 
-    async def _best_effort_safe_shutdown(self, session) -> str:
+    # safe_shutdown YAML が無いとき fallback を適用するカテゴリ (v0.5.0.4)
+    # その他 (温調器・モータ・ポンプ・電子負荷・リレー等) は YAML 定義必須。
+    _SAFE_SHUTDOWN_FALLBACK_CATEGORIES = frozenset({
+        "power_supply",
+        "source_measure_unit",
+    })
+
+    # YAML safe_shutdown 内の各 wait step に許容する最大秒数 (v0.5.0.4)
+    _SAFE_SHUTDOWN_WAIT_MAX_S = 10.0
+
+    async def _best_effort_safe_shutdown(self, session) -> dict:
         """安全停止を実行する。
 
-        優先順位 (v0.5.0.2):
-          1. YAML の `safe_shutdown` セクションに定義されたシーケンス (機器ごとに任意定義)
-          2. 上記が無い場合のみ、power_supply 系を想定した既存 fallback
-             (set_output OFF + set_voltage 0)
+        v0.5.0.4 で返り値を構造化 dict に変更:
+          {
+            "attempted": bool,
+            "source": "yaml" | "fallback_power_supply" | "none",
+            "success": bool,                    # 全 step が success なら True
+            "steps": [{"step": i, "kind": "command"|"wait", "command": ..., "success": bool, ...}],
+            "skipped_reason": str | None,       # source="none" の場合の理由
+          }
 
-        温調器・モータ・電子負荷等は fallback では危険なので、必ず YAML 定義を推奨する。
+        優先順位:
+          1. YAML の `safe_shutdown` セクションに定義されたシーケンス
+          2. 上記が無くかつ metadata.category in {power_supply, source_measure_unit} の場合のみ、
+             fallback (set_output OFF + set_voltage 0)
+          3. その他のカテゴリ (温調器・モータ等) は fallback 無効 → no-op
         """
         if session is None or session.definition is None:
-            return "no session"
+            return {
+                "attempted": False, "source": "none", "success": False,
+                "steps": [], "skipped_reason": "no session",
+            }
 
         # 1. YAML 定義された safe_shutdown を優先
         if session.definition.safe_shutdown:
@@ -711,14 +738,32 @@ class JobManager:
                 session, session.definition.safe_shutdown,
             )
 
-        # 2. Fallback: power_supply 想定の最小 best-effort
-        attempts: list[str] = ["fallback=power_supply_default"]
-        for cmd_name, args in [
+        # 2. Fallback: 電源系のみ
+        category = session.definition.metadata.category
+        if category not in self._SAFE_SHUTDOWN_FALLBACK_CATEGORIES:
+            return {
+                "attempted": False, "source": "none", "success": False,
+                "steps": [],
+                "skipped_reason": (
+                    f"no YAML safe_shutdown; fallback disabled for "
+                    f"category='{category}' (allowed: power_supply, source_measure_unit)"
+                ),
+            }
+
+        # fallback 実行
+        steps_result: list[dict] = []
+        all_ok = True
+        for idx, (cmd_name, args) in enumerate([
             ("set_output", {"state": "OFF"}),
             ("set_voltage", {"voltage": 0}),
-        ]:
+        ]):
             cmd_def = session.definition.commands.get(cmd_name)
             if cmd_def is None:
+                steps_result.append({
+                    "step": idx, "kind": "command", "command": cmd_name,
+                    "success": False, "error": "CommandNotFound",
+                })
+                all_ok = False
                 continue
             try:
                 step = CommandStep(command=cmd_name, args=args)
@@ -727,22 +772,65 @@ class JobManager:
                     override_safety=True,
                     override_reason="safe_shutdown by cancel (fallback)",
                 )
-                attempts.append(f"{cmd_name}:{'ok' if r.get('success') else 'fail'}")
+                ok = bool(r.get("success"))
+                all_ok = all_ok and ok
+                steps_result.append({
+                    "step": idx, "kind": "command", "command": cmd_name,
+                    "success": ok,
+                    "scpi_sent": r.get("scpi_sent"),
+                    "error": r.get("error") if not ok else None,
+                })
             except Exception as e:
-                attempts.append(f"{cmd_name}:err({type(e).__name__})")
-        if len(attempts) == 1:  # fallback タグだけ
-            return "no shutdown commands available"
-        return ",".join(attempts)
+                all_ok = False
+                steps_result.append({
+                    "step": idx, "kind": "command", "command": cmd_name,
+                    "success": False, "error": type(e).__name__,
+                    "message": str(e),
+                })
 
-    async def _run_yaml_shutdown(self, session, steps: list) -> str:
-        """YAML 定義の safe_shutdown ステップを順次実行 (override_safety=True)"""
-        results: list[str] = ["source=yaml"]
+        return {
+            "attempted": True,
+            "source": "fallback_power_supply",
+            "success": all_ok,
+            "steps": steps_result,
+        }
+
+    async def _run_yaml_shutdown(self, session, steps: list) -> dict:
+        """YAML 定義の safe_shutdown ステップを順次実行 (override_safety=True)
+
+        v0.5.0.4 で:
+        - 構造化結果 dict を返す
+        - wait step は slice 方式 (cancel/timeout を阻害しない、上限 _SAFE_SHUTDOWN_WAIT_MAX_S)
+        - 文字列式 ("$var") は受け付けない (数値リテラルのみ、安全停止の予測可能性のため)
+        """
+        steps_result: list[dict] = []
+        all_ok = True
+
         for idx, rs in enumerate(steps):
             try:
                 if rs.step_type == "wait":
-                    seconds = float(rs.wait.get("seconds", 0))
-                    await asyncio.sleep(seconds)
-                    results.append(f"wait_{seconds}s:ok")
+                    seconds_raw = rs.wait.get("seconds", 0)
+                    # 数値リテラルのみ許可
+                    if isinstance(seconds_raw, str):
+                        steps_result.append({
+                            "step": idx, "kind": "wait",
+                            "success": False, "error": "ExpressionNotAllowed",
+                            "message": "safe_shutdown wait は数値リテラルのみ許可",
+                        })
+                        all_ok = False
+                        continue
+                    seconds = min(float(seconds_raw), self._SAFE_SHUTDOWN_WAIT_MAX_S)
+                    # slice 方式 (上限到達・kernel cancel に応答可能)
+                    remaining = seconds
+                    while remaining > 0:
+                        chunk = min(remaining, _WAIT_SLICE_S)
+                        await asyncio.sleep(chunk)
+                        remaining -= chunk
+                    steps_result.append({
+                        "step": idx, "kind": "wait",
+                        "seconds": seconds,
+                        "success": True,
+                    })
                 else:
                     step = CommandStep(command=rs.command or "", args=rs.args)
                     r = await execute_command_step(
@@ -750,10 +838,28 @@ class JobManager:
                         override_safety=True,
                         override_reason="safe_shutdown by cancel (YAML)",
                     )
-                    results.append(f"{rs.command}:{'ok' if r.get('success') else 'fail'}")
+                    ok = bool(r.get("success"))
+                    all_ok = all_ok and ok
+                    steps_result.append({
+                        "step": idx, "kind": "command", "command": rs.command,
+                        "success": ok,
+                        "scpi_sent": r.get("scpi_sent"),
+                        "error": r.get("error") if not ok else None,
+                    })
             except Exception as e:
-                results.append(f"step{idx}:err({type(e).__name__})")
-        return ",".join(results)
+                all_ok = False
+                steps_result.append({
+                    "step": idx, "kind": getattr(rs, "step_type", "?"),
+                    "success": False, "error": type(e).__name__,
+                    "message": str(e),
+                })
+
+        return {
+            "attempted": True,
+            "source": "yaml",
+            "success": all_ok,
+            "steps": steps_result,
+        }
 
     def _safe_transition(self, job_id: str, to: JobStatus) -> None:
         """遷移ルール違反は黙って無視 (cancelling 中の状態変更等)"""

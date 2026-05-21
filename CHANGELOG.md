@@ -1,5 +1,83 @@
 # 変更履歴
 
+## v0.5.0.4 — 外部レビュー対応 (API 露出 + ドキュメント整合 + safe_shutdown 構造化)
+
+v0.5.0.2/v0.5.0.3 公開後の外部レビューで指摘された P0 三件 + P1 三件への対応。
+コード本体の機能は v0.5.0.2 で完成しているが、**API 露出とドキュメント整合**が
+不十分だったため、それを整える。
+
+### API / docs 整合
+
+- **P0: `docs/jobs.md` を `ResourceScheduler` 前提に更新**
+  - 旧: 「同一機器への並列 Job は `VisaManager` の resource-level lock で直列化」
+  - 新: 「同一 resource への並列 Job は `ResourceScheduler` により Job 単位で直列化。
+    running/waiting 中は Job 終了まで resource 占有」
+  - `queued` も再起動時 `interrupted` 対象であることを明記
+  - `queue_policy` の説明追加 (queue / reject_if_busy)
+- **P0: MCP `start_recipe_job` に `queue_policy` 引数を追加**
+  - 既に `JobManager.start_recipe_job` で実装されていたが MCP ツールに未露出だったため
+    LLM はデフォルトの `queue` しか使えなかった
+  - `queue_policy: str = "queue"` を MCP ツール引数に追加、バリデーション付き
+  - `reject_if_busy` は busy 時に `error_class='blocked'` を返す
+- **P0: `start_recipe_job` レスポンスに `data.scheduling` 追加**
+  - `immediate_start` / `blocked_by_job` / `queue_position` / `queue_policy` を含む構造化情報
+  - LLM が「今すぐ走るのか、待ち行列に入ったのか」を即座に判断可能
+  - `ResourceScheduler.get_scheduling_info()` メソッドを新設
+
+### safe_shutdown 改善
+
+- **P1: fallback を `metadata.category` で制限**
+  - 旧: 全機器で `set_output OFF + set_voltage 0` を試行 (温調器・モータでは危険)
+  - 新: `power_supply` / `source_measure_unit` カテゴリのみ fallback 適用
+  - その他のカテゴリで YAML `safe_shutdown` 未定義の場合は **no-op** + 構造化された理由
+    (`skipped_reason: "fallback disabled for category=..."`)
+- **P1: 構造化結果を返す**
+  - 旧: 文字列 (`"source=yaml,set_output:ok,set_voltage:ok"`)
+  - 新: dict
+    ```python
+    {
+      "attempted": bool,
+      "source": "yaml" | "fallback_power_supply" | "none",
+      "success": bool,
+      "steps": [{"step": i, "kind": "command"|"wait", ...}],
+      "skipped_reason": str | None,
+    }
+    ```
+  - `cancel_job` の result に `safe_shutdown` キーで埋め込み、LLM が成否を機械可読に判定可能
+- **P1: YAML safe_shutdown 内 wait の slice 化 + 上限**
+  - 旧: `asyncio.sleep(seconds)` 一括 (cancel_job timeout と整合しない)
+  - 新: `_WAIT_SLICE_S=0.2` 単位で slice、`_SAFE_SHUTDOWN_WAIT_MAX_S=10` 秒で上限
+  - YAML 内 wait は数値リテラルのみ許可 (式 `$var` は拒否、予測可能性のため)
+
+### テスト追加
+
+- `tests/test_safe_shutdown_v0504.py` (7 件)
+  - power_supply での fallback 動作
+  - multimeter での fallback 抑止 (skipped_reason 確認)
+  - YAML 定義時の YAML 優先
+  - YAML wait の上限切り (100s 指定 → 10s で打ち切り)
+  - no session 時の no-op
+  - scheduling info: immediate / queued
+
+合計 235 件パス (v0.5.0.3 の 220 件から +15)。
+
+### 後方互換
+
+- 既存 YAML / Recipe / Safety はすべて変更なしで動作
+- `start_recipe_job` MCP の `queue_policy` 引数は省略可 (default "queue")
+- **挙動変化が一件**: 非 power_supply 系機器で `safe_shutdown` を YAML 定義していない場合、
+  従来は最低限の `set_output OFF + set_voltage 0` を試行していたが、v0.5.0.4 では
+  no-op (skipped) になる。**該当機器の YAML に明示的に `safe_shutdown` を追加すること**
+
+### 残課題 (v0.5.1 で対応予定)
+
+- `recommended_next_actions` 内の `retry_with_override` を別カテゴリ (`dangerous_actions_available`)
+  に分離 (現状は `requires_human_confirmation: True` で警告強化済み)
+- wait 中の `step_remaining_s` を `get_job_status` に追加
+- `job_events` 軽量テーブル
+
+---
+
 ## v0.5.0.3 — 内部レビュー (Job queue のレース条件修正)
 
 v0.5.0.2 公開後の内部コードレビューで検出された 2 件のレース条件への対処パッチ。

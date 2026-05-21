@@ -200,6 +200,44 @@ class ResourceScheduler:
                 self._job_resources.pop(job_id, None)
             return removed_any
 
+    async def get_scheduling_info(self, job_id: str) -> dict:
+        """
+        Job の scheduler 上のスケジューリング状態を返す (v0.5.0.4)。
+
+        返り値の dict:
+          - immediate_start: bool ── True なら enqueue 時点で全 resource 空いていて即 running 可
+          - blocked_by_job: str | None ── queue 待ち中の場合の blocker job_id
+          - queue_position: int ── queue 内位置 (0-indexed)、active 中は -1
+          - resources: list[str] ── 必要 resource (canonical 順)
+          - in_active: bool ── 現在 active マップに登録中
+          - in_queue: bool ── 現在 queue に並んでいる
+        """
+        async with self._lock:
+            resources = self._job_resources.get(job_id, [])
+            in_active = any(self._active.get(r) == job_id for r in resources)
+            in_queue = False
+            position = -1
+            blocking: str | None = None
+            for r in resources:
+                q = self._queues.get(r)
+                if q and job_id in q:
+                    in_queue = True
+                    position = max(position, list(q).index(job_id))
+                if blocking is None and not in_active:
+                    blocker_active = self._active.get(r)
+                    if blocker_active is not None and blocker_active != job_id:
+                        blocking = blocker_active
+                    elif q and q[0] != job_id:
+                        blocking = q[0]
+            return {
+                "immediate_start": in_active,
+                "blocked_by_job": blocking,
+                "queue_position": position,
+                "resources": list(resources),
+                "in_active": in_active,
+                "in_queue": in_queue,
+            }
+
     async def get_queue_info(self, job_id: str) -> dict | None:
         """
         queued な Job の情報を返す。queue_position (0-indexed 最初の resource) と
