@@ -336,23 +336,40 @@ class JobManager:
         return rec
 
     def _build_wait_step(self, wait_type: str, params: dict[str, Any]):
-        """wait_type + params から IR Step を構築 (validation 込み)"""
+        """wait_type + params から IR Step を構築 (validation 込み)
+
+        params の必須キーが欠落していた場合は分かりやすい ValueError を raise する
+        (KeyError だと LLM 向けエラーメッセージが空文字 'seconds' のように
+        不親切になるため)。
+        """
+        def _require(key: str) -> Any:
+            if key not in params:
+                raise ValueError(
+                    f"start_wait_job(wait_type={wait_type!r}): "
+                    f"params に必須キー '{key}' がありません"
+                )
+            return params[key]
+
         if wait_type == "seconds":
-            return WaitStep(seconds=float(params["seconds"]))
+            return WaitStep(seconds=float(_require("seconds")))
         if wait_type == "until":
+            ts = params.get("timestamp")
+            sec = params.get("seconds_from_now")
+            if (ts in (None, "")) and (sec is None):
+                raise ValueError(
+                    "start_wait_job(wait_type='until'): "
+                    "params に 'timestamp' または 'seconds_from_now' のいずれかが必須です"
+                )
             return WaitUntilStep(
-                timestamp=params.get("timestamp"),
-                seconds_from_now=(
-                    float(params["seconds_from_now"])
-                    if params.get("seconds_from_now") is not None else None
-                ),
+                timestamp=ts if ts not in (None, "") else None,
+                seconds_from_now=(float(sec) if sec is not None else None),
             )
         if wait_type == "condition":
             return WaitForConditionStep(
-                instrument=params["instrument"],
-                command=params["command"],
+                instrument=_require("instrument"),
+                command=_require("command"),
                 args=params.get("args") or {},
-                condition_expr=params["condition_expr"],
+                condition_expr=_require("condition_expr"),
                 interval_s=float(params.get("interval_s", 1.0)),
                 timeout_s=float(params.get("timeout_s", 60.0)),
                 command_timeout_s=(
@@ -365,11 +382,11 @@ class JobManager:
             )
         if wait_type == "stable_value":
             return WaitForStableStep(
-                instrument=params["instrument"],
-                command=params["command"],
+                instrument=_require("instrument"),
+                command=_require("command"),
                 args=params.get("args") or {},
-                tolerance=float(params["tolerance"]),
-                window_s=float(params["window_s"]),
+                tolerance=float(_require("tolerance")),
+                window_s=float(_require("window_s")),
                 interval_s=float(params.get("interval_s", 1.0)),
                 timeout_s=float(params.get("timeout_s", 60.0)),
                 command_timeout_s=(
@@ -823,14 +840,8 @@ class JobManager:
                     runtime.current_progress = None
                     self._safe_transition(job_id, JobStatus.RUNNING)
                 elif isinstance(step, CommandStep):
-                    # v0.5.1: instrument 指定があれば別 session を使う
-                    target_session = session
-                    if step.instrument:
-                        alt = self._sessions.get_session(step.instrument)
-                        if alt is not None:
-                            target_session = alt
                     result = await execute_command_step(
-                        self._visa, target_session, step,
+                        self._visa, session, step,
                         override_safety=override_safety,
                         override_reason=override_reason,
                     )
@@ -1209,11 +1220,17 @@ class JobManager:
         runtime.current_progress = progress
 
     def get_progress(self, job_id: str) -> dict | None:
-        """v0.5.1: 現在の polling 進捗 (なければ None)"""
+        """v0.5.1: 現在の polling 進捗 (なければ None)。
+
+        runtime.current_progress は polling executor の on_progress callback
+        により上書きされ続けるため、ここでスナップショット (shallow copy)
+        を返して、呼び出し側 (MCP JSON serialize) が走っている最中に
+        中身が書き換わるのを防ぐ。
+        """
         rt = self._runtimes.get(job_id)
-        if rt is None:
+        if rt is None or rt.current_progress is None:
             return None
-        return rt.current_progress
+        return dict(rt.current_progress)
 
     def _safe_transition(self, job_id: str, to: JobStatus) -> None:
         """遷移ルール違反は黙って無視 (cancelling 中の状態変更等)"""

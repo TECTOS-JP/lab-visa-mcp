@@ -153,9 +153,30 @@ commands:
 - `interval_s <= window_s`
 - `ceil(window_s / interval_s) + 1 >= min_samples` ── サンプル数下限
 
+### 内部レビュー修正 (push 前)
+
+- **`_is_stable` の早期判定バグを修正**: 旧コードは window 内に min_samples 個あれば
+  stable と返していたが、実観測時間 (`latest_t - earliest_t`) が `window_s` に達して
+  いない場合 stable と判定しないように変更。これがないと window_s=60 / interval=5 で
+  開始 10 秒の 3 サンプルだけで stable と返してしまう。
+- **`get_progress` のシャローコピー化**: runtime.current_progress を直接返すと
+  MCP JSON serialize 中に polling 側 callback で中身が書き換わる可能性があるため
+  `dict(progress)` でスナップショットを返す。
+- **`samples` リストの prune**: wait_for_stable で全サンプル蓄積していたが、
+  window 外の古いサンプルを順次破棄するように変更。24h × 1Hz polling 等の長時間
+  実行でのメモリ膨張を防ぐ。最古 1 個は「window_s 経過判定」のため残す。
+- **`_build_wait_step` の必須キー検証**: KeyError("seconds") のような不親切な
+  エラーではなく、`ValueError("start_wait_job(wait_type='seconds'): params に
+  必須キー 'seconds' がありません")` で返す。
+- **`CommandStep.instrument` フィールドを削除**: 追加したが YAML / recipe_to_plan
+  から populate される経路がなく、v0.5.1 では dead field だった。v0.6.0 で
+  group/unit 連携と共に再導入する。
+- 追加テスト 2 件: `test_is_stable_rejects_before_window_elapsed` /
+  `test_is_stable_accepts_after_window_elapsed`
+
 ### テスト
 
-`tests/test_polling_wait_v051.py` に 28 件追加 (合計 **243 passed**)。
+`tests/test_polling_wait_v051.py` に 30 件追加 (合計 **245 passed**)。
 
 - 条件式評価 (比較・論理・abs・禁止構文)
 - 値抽出 (value_path / value キー / 単一数値 / raw float / 失敗)

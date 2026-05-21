@@ -30,16 +30,12 @@ class CommandStep(BaseModel):
     `command` は機器定義の commands.<name> を参照するキー。
     `args` の値は文字列で "$" 始まりなら式評価 (recipe parameter を変数として参照)。
     `result_as` を指定すると後続ステップから ${steps.<result_as>} で参照可能 (v0.6.0+)。
-
-    `instrument` は polling step との対称性のためのオプション (省略時は Job の主 resource を使用)。
-    v0.5.1 時点では Job manager 側で必要なら resolution が行われる。
     """
     type: Literal["command"] = "command"
     command: str
     args: dict[str, Any] = Field(default_factory=dict)
     result_as: str | None = None
     description: str = ""
-    instrument: str | None = None  # v0.5.1: 別 instrument 指定可能 (v0.6.0 group/unit 連携を視野)
 
 
 class WaitStep(BaseModel):

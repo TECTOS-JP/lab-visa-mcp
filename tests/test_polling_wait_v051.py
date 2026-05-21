@@ -230,6 +230,28 @@ async def test_wait_for_stable_success_after_window():
     assert res["final_delta"] == 0.0
 
 
+def test_is_stable_rejects_before_window_elapsed():
+    """internal review fix: window_s 経過前に min_samples だけ溜まっても stable と判定しない"""
+    from visa_mcp.polling_executor import _is_stable
+    # window_s=60、interval=5 想定で、開始 10 秒で 3 サンプル (全て同値)
+    samples = [(0.0, 25.0), (5.0, 25.0), (10.0, 25.0)]
+    stable, delta = _is_stable(samples, tolerance=0.1, min_samples=3, window_s=60.0)
+    assert stable is False, "window_s=60 に渡って観測していないのに stable になっている"
+    # delta は参考値として返る
+    assert delta == 0.0
+
+
+def test_is_stable_accepts_after_window_elapsed():
+    """window_s 経過後に min_samples 以上があり tolerance 以内なら stable"""
+    from visa_mcp.polling_executor import _is_stable
+    # window_s=10、合計 15 秒観測、最後 10 秒に 3 サンプル
+    samples = [(0.0, 24.0), (5.0, 25.0), (10.0, 25.0), (15.0, 25.05)]
+    stable, delta = _is_stable(samples, tolerance=0.1, min_samples=3, window_s=10.0)
+    assert stable is True
+    # window 内のみ評価: t=[5,10,15] (15-10=5 <= window_s=10)
+    assert delta is not None and delta <= 0.1
+
+
 @pytest.mark.asyncio
 async def test_wait_for_stable_timeout():
     # 値が振動し続けて安定しない

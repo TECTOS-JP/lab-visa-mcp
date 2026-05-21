@@ -286,7 +286,6 @@ async def execute_wait_for_condition(
 
     start = time.monotonic()
     deadline = start + step.timeout_s
-    samples: list[dict] = []
     consecutive_errors = 0
     last_value: float | None = None
 
@@ -296,7 +295,6 @@ async def execute_wait_for_condition(
         attempt = 0
         value: float | None = None
         error_kind: str | None = None
-        raw_resp = ""
         while attempt <= step.retry_on_error:
             reason = cancel_check()
             if reason:
@@ -309,7 +307,7 @@ async def execute_wait_for_condition(
                     "elapsed_s": time.monotonic() - start,
                     "last_value": last_value,
                 }
-            value, raw_resp, _parsed, error_kind = await _do_one_poll(
+            value, _raw, _parsed, error_kind = await _do_one_poll(
                 visa, target_session, step.command, step.args,
                 step.command_timeout_s, step.value_path,
             )
@@ -320,9 +318,6 @@ async def execute_wait_for_condition(
         sample_count += 1
         if error_kind is not None:
             consecutive_errors += 1
-            samples.append({
-                "t": time.monotonic() - start, "error": error_kind,
-            })
             if consecutive_errors >= step.max_consecutive_errors:
                 return {
                     "step_type": "wait_for_condition",
@@ -339,7 +334,6 @@ async def execute_wait_for_condition(
         else:
             consecutive_errors = 0
             last_value = value
-            samples.append({"t": time.monotonic() - start, "value": value})
 
             # 条件評価
             try:
@@ -428,14 +422,28 @@ async def execute_wait_for_condition(
 def _is_stable(window_samples: list[tuple[float, float]], tolerance: float,
                min_samples: int, window_s: float) -> tuple[bool, float | None]:
     """
-    window_samples: [(t, value), ...] 時系列順
-    安定判定: window_s 内のサンプル数が min_samples 以上で、max - min <= tolerance
+    window_samples: [(t, value), ...] 時系列順 (t は polling 開始からの経過秒)
+    安定判定:
+      1. window_s に渡って観測している (= 最古サンプルが latest_t - window_s 以下に達している)
+      2. window 内サンプル数 >= min_samples
+      3. max - min <= tolerance
     返り値: (is_stable, current_delta_or_None)
+
+    重要: 単に「最新 window_s 内のサンプル数」だけで判定すると、
+    開始から window_s に満たない時点でも min_samples を満たせば stable と返してしまう。
+    実際には window_s に渡って観測した上で安定していることを保証したい。
     """
     if not window_samples:
         return False, None
-    # window 内 (最新時刻から window_s 以内) のサンプルを抽出
     latest_t = window_samples[-1][0]
+    earliest_t = window_samples[0][0]
+    # まだ window_s 分の観測時間が経過していないなら、いかなる値分布でも stable とは見なさない
+    if (latest_t - earliest_t) < window_s:
+        # 参考値として現在の window 内 delta を返す
+        in_window = [v for (t, v) in window_samples]
+        delta = max(in_window) - min(in_window) if len(in_window) >= 2 else None
+        return False, delta
+
     in_window = [v for (t, v) in window_samples if (latest_t - t) <= window_s]
     if len(in_window) < min_samples:
         return False, (max(in_window) - min(in_window) if len(in_window) >= 2 else None)
@@ -525,6 +533,17 @@ async def execute_wait_for_stable(
             last_value = value
             t = time.monotonic() - start
             samples.append((t, value))  # type: ignore[arg-type]
+
+            # メモリ膨張防止: window_s + 1 サンプル分より古い記録を破棄。
+            # _is_stable は最新 window_s 内のみ参照するため、それより古いものは不要。
+            # ただし「window_s 経過観測」判定のため、最古 1 個は残す必要あり。
+            cutoff = t - step.window_s
+            # 最古を 1 個だけ残して残りは window 内に絞る
+            i = 0
+            while i < len(samples) - 1 and samples[i + 1][0] < cutoff:
+                i += 1
+            if i > 0:
+                samples[:i] = []
 
             stable, delta = _is_stable(
                 samples, step.tolerance, step.min_samples, step.window_s,
