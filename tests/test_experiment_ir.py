@@ -44,6 +44,14 @@ def test_wait_step_float():
     assert s.seconds == 0.5
 
 
+def test_wait_step_negative_rejected():
+    """v0.5.0.1: field_validator で負数を拒否"""
+    with pytest.raises(Exception):  # pydantic ValidationError
+        WaitStep(seconds=-1)
+    with pytest.raises(Exception):
+        WaitStep(seconds=-0.001)
+
+
 # === Plan ===
 
 def test_plan_empty():

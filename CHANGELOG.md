@@ -1,5 +1,45 @@
 # 変更履歴
 
+## v0.5.0.1 — コードレビュー対応パッチ
+
+v0.5.0 公開後の内部コードレビューで指摘された Bug 2 件と品質改善 3 件への対処。
+機能追加なし、既存 API と挙動は不変 (Bug 修正は隠れていた負数受理問題のみ動作変化)。
+
+### バグ修正
+
+- **`WaitStep` の負数検証が動作していなかった問題を修正** (High)
+  - 旧コード: `__post_init_post_parse__` を使用 → Pydantic v2 では呼ばれず、負の seconds が silently 受理されていた
+  - 修正: `@field_validator("seconds")` に置き換え、ValidationError を確実に発生
+  - 影響: `WaitStep(seconds=-5)` 等の不正値が今後は登録時にエラー
+- **`JobManager._runtimes` のメモリリークを修正** (High)
+  - 旧コード: Job が終端 (completed / failed / cancelled / timeout / interrupted) に達しても `_runtimes` dict から削除されなかった
+  - 修正: `_run_job` を `try/finally` で包み、終端時に `self._runtimes.pop(job_id, None)` を実行
+  - 影響: 長期運用時のメモリ使用量が安定
+
+### リファクタリング (挙動変化なし)
+
+- **`step_executor.py` モジュール新設** (Medium)
+  - `_execute_command_step` / `_execute_wait_step` を `recipe_executor.py` から切り出し、`execute_command_step` / `execute_wait_step` として public 化
+  - 旧コードは prefix `_` で命名されつつ `job/manager.py` から外部 import されており、命名規約と実態が乖離していた
+  - import 経路: `from visa_mcp.step_executor import execute_command_step, execute_wait_step`
+- **死コード削除**: `_run_job` 内の未使用 `last_terminal: JobStatus` 変数を削除
+- **コメント追加**: `_run_job` ループ先頭・末尾の cancel チェック重複箇所に、「最後の step 完了直後の cancel を救うため」という意図を明記
+
+### テスト追加
+
+- `test_wait_step_negative_rejected` (test_experiment_ir.py): 負の seconds が ValidationError
+- `test_runtimes_cleaned_after_terminal` (test_job_manager.py): 終端後に `_runtimes` から消える
+- `test_runtimes_cleaned_after_immediate_failure` (test_job_manager.py): validation 失敗時は `_runtimes` に入らない
+
+合計 215 件 (v0.5.0 の 212 件から +3 件)。
+
+### 後方互換
+
+- 既存 MCP ツール / Recipe / YAML / Safety / Response Format は完全に不変
+- `WaitStep(seconds=-N)` を意図的に使っていた利用者はいないはず (機能的に意味がない)
+
+---
+
 ## v0.5.0 — Job MVP 正式版
 
 実験実行基盤の "Job MVP" を正式リリース。rc1/rc2 で導入した基盤に **timeout 自動遷移** と

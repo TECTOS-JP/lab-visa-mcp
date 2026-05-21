@@ -23,11 +23,8 @@ from visa_mcp.job.state_machine import (
     is_terminal,
 )
 from visa_mcp.job.store import JobStore, JobRecord
-from visa_mcp.recipe_executor import (
-    _execute_command_step,
-    _execute_wait_step,
-    recipe_to_plan,
-)
+from visa_mcp.recipe_executor import recipe_to_plan
+from visa_mcp.step_executor import execute_command_step, execute_wait_step
 from visa_mcp.session_manager import SessionManager
 from visa_mcp.visa_manager import VisaManager
 
@@ -267,7 +264,29 @@ class JobManager:
         override_safety: bool,
         override_reason: str,
     ) -> None:
-        """Job のバックグラウンド実行本体。"""
+        """Job のバックグラウンド実行本体。
+
+        終端遷移後、self._runtimes から自分のエントリを必ず削除する (メモリリーク防止)。
+        """
+        job_id = rec.job_id
+        try:
+            await self._run_job_inner(
+                rec,
+                override_safety=override_safety,
+                override_reason=override_reason,
+            )
+        finally:
+            # v0.5.0.1 fix: 終端 Job の Task 参照を解放してメモリリークを防ぐ
+            self._runtimes.pop(job_id, None)
+
+    async def _run_job_inner(
+        self,
+        rec: JobRecord,
+        *,
+        override_safety: bool,
+        override_reason: str,
+    ) -> None:
+        """Job のバックグラウンド実行本体 (内部)。終端遷移を含む全状態管理。"""
         job_id = rec.job_id
         runtime = self._runtimes[job_id]
         session = self._sessions.get_session(rec.resource_name)
@@ -314,17 +333,19 @@ class JobManager:
         self._store.transition_status(job_id, JobStatus.RUNNING, current_step_index=0)
 
         step_results: list[dict] = []
-        last_terminal: JobStatus = JobStatus.COMPLETED
 
         try:
             for idx, step in enumerate(plan.steps):
-                # timeout チェック
+                # 各 step 開始前の timeout / cancel チェック。
+                # ループ末尾でも同様のチェックを行うが、ここでのチェックは
+                # 「最初の step 前」と「直近 step 完了後の cancel が次イテレーションで
+                # 検出される」用。重複に見えるが、最後の step 完了直後の cancel を
+                # 救うためにループ末尾チェックも必要。
                 if runtime.is_timed_out():
                     self._record_timeout(rec, idx, step_results)
                     return
-                # cancel チェック
                 if runtime.cancel_mode is not None:
-                    last_terminal = await self._handle_cancel(
+                    await self._handle_cancel(
                         rec, session, runtime.cancel_mode, step_results,
                     )
                     return
@@ -341,7 +362,7 @@ class JobManager:
                     result = await self._run_wait_with_cancel_check(step, runtime)
                     self._safe_transition(job_id, JobStatus.RUNNING)
                 elif isinstance(step, CommandStep):
-                    result = await _execute_command_step(
+                    result = await execute_command_step(
                         self._visa, session, step,
                         override_safety=override_safety,
                         override_reason=override_reason,
@@ -362,13 +383,12 @@ class JobManager:
                         return
                     # cancel 要求による wait 中断は failed ではなく cancel 経路へ
                     if result.get("interrupted_by_cancel"):
-                        last_terminal = await self._handle_cancel(
+                        await self._handle_cancel(
                             rec, session,
                             runtime.cancel_mode or CancelMode.AFTER_CURRENT_STEP,
                             step_results,
                         )
                         return
-                    last_terminal = JobStatus.FAILED
                     err_class = result.get("error", "internal")
                     if result.get("blocked_by_safety"):
                         err_class = "safety"
@@ -385,13 +405,14 @@ class JobManager:
                     )
                     return
 
-                # cancel チェック (各 step 完了後)
+                # ループ末尾の cancel チェック。
+                # 「最後の step 完了直後に cancel された」ケースを救うため必要。
+                # 中間 step の場合は次イテレーション先頭のチェックと等価。
                 if runtime.cancel_mode is not None:
-                    # after_current_step ならここで停止可能
                     if runtime.cancel_mode in (
                         CancelMode.AFTER_CURRENT_STEP, CancelMode.SAFE_SHUTDOWN,
                     ):
-                        last_terminal = await self._handle_cancel(
+                        await self._handle_cancel(
                             rec, session, runtime.cancel_mode, step_results,
                         )
                         return
@@ -541,7 +562,7 @@ class JobManager:
                 continue
             try:
                 step = CommandStep(command=cmd_name, args=args)
-                r = await _execute_command_step(
+                r = await execute_command_step(
                     self._visa, session, step,
                     override_safety=True,
                     override_reason="safe_shutdown by cancel",

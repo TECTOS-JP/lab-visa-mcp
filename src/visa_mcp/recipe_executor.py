@@ -21,11 +21,10 @@ from typing import Any
 
 from .experiment_ir import CommandStep, Plan, Step, WaitStep
 from .models.instrument_def import InstrumentDefinition, RecipeDefinition, RecipeStep
+from .step_executor import execute_command_step, execute_wait_step
 from .utils.expression import resolve_arg, ExpressionError
-from .utils.param_validator import validate_and_build_scpi, ParameterValidationError
-from .visa_manager import VisaManager, VisaError
+from .visa_manager import VisaManager
 from .session_manager import InstrumentSession
-from . import safety as sf
 
 logger = logging.getLogger(__name__)
 
@@ -94,9 +93,9 @@ async def execute_plan(
 
     for idx, step in enumerate(plan.steps):
         if isinstance(step, WaitStep):
-            result = await _execute_wait_step(step)
+            result = await execute_wait_step(step)
         elif isinstance(step, CommandStep):
-            result = await _execute_command_step(
+            result = await execute_command_step(
                 visa, session, step,
                 override_safety=override_safety,
                 override_reason=override_reason,
@@ -129,123 +128,10 @@ async def execute_plan(
 
 
 # ============================================================
-# 個別 step 実行
-# ============================================================
-
-async def _execute_wait_step(step: WaitStep) -> dict:
-    """単純な秒待機。Job 化されていない場合はこの間 await でブロックする (v0.5.0-rc1)。"""
-    await asyncio.sleep(step.seconds)
-    return {
-        "step_type": "wait",
-        "seconds": step.seconds,
-        "success": True,
-    }
-
-
-async def _execute_command_step(
-    visa: VisaManager,
-    session: InstrumentSession,
-    step: CommandStep,
-    override_safety: bool,
-    override_reason: str,
-) -> dict:
-    """機器コマンドを 1 回実行。安全制約 + パラメータ検証 + SCPI 送信。"""
-    cmd_def = session.definition.commands.get(step.command)
-    if cmd_def is None:
-        return {
-            "command": step.command,
-            "success": False,
-            "error": "CommandNotFound",
-            "message": f"コマンド '{step.command}' が定義されていません",
-        }
-
-    resolved_args = step.args  # recipe_to_plan で解決済み
-    mode = sf.get_safety_mode()
-
-    # 安全制約検証
-    violations = sf.validate(
-        session.definition, step.command, resolved_args,
-        session_history=session.command_history,
-    )
-    action, msg = sf.decide_action(violations, mode, override_safety, override_reason or None)
-
-    if action in ("block_advisory", "block_strict"):
-        sf.write_audit(
-            session.resource_name, step.command, resolved_args, violations,
-            action=action, mode=mode,
-            override_safety=override_safety, override_reason=override_reason or None,
-        )
-        return {
-            "command": step.command,
-            "success": False,
-            "blocked_by_safety": True,
-            "violations": list(violations),
-            "action": action,
-            "message": msg,
-        }
-
-    if violations:
-        sf.write_audit(
-            session.resource_name, step.command, resolved_args, violations,
-            action="proceed_with_override" if override_safety else "proceed_permissive",
-            mode=mode,
-            override_safety=override_safety, override_reason=override_reason or None,
-        )
-
-    # パラメータ検証 + SCPI 組み立て
-    try:
-        scpi = validate_and_build_scpi(cmd_def, resolved_args)
-    except ParameterValidationError as e:
-        return {
-            "command": step.command,
-            "success": False,
-            "error": "ParameterValidationError",
-            "message": str(e),
-        }
-
-    conn = session.definition.connection
-    timeout_ms = cmd_def.timeout_ms or conn.default_timeout_ms
-
-    try:
-        if cmd_def.type == "query":
-            raw = await visa.query(
-                session.resource_name, scpi, timeout_ms=timeout_ms,
-                read_termination=conn.read_termination,
-                write_termination=conn.write_termination,
-            )
-            session.record_command(step.command)
-            return {
-                "command": step.command,
-                "args": resolved_args,
-                "scpi_sent": scpi,
-                "raw_response": raw,
-                "success": True,
-            }
-        else:
-            await visa.write(
-                session.resource_name, scpi, timeout_ms=timeout_ms,
-                read_termination=conn.read_termination,
-                write_termination=conn.write_termination,
-            )
-            session.record_command(step.command)
-            return {
-                "command": step.command,
-                "args": resolved_args,
-                "scpi_sent": scpi,
-                "success": True,
-            }
-    except VisaError as e:
-        return {
-            "command": step.command,
-            "success": False,
-            "error": type(e).__name__,
-            "message": str(e),
-        }
-
-
-# ============================================================
 # 公開エントリポイント (既存 API、後方互換維持)
 # ============================================================
+# 個別 step 実行ロジックは v0.5.0.1 で step_executor.py に切り出し済み。
+# このモジュールは Recipe 単位の orchestration のみを担当する。
 
 async def execute_recipe(
     visa: VisaManager,

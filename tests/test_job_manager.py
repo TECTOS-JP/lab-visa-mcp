@@ -171,3 +171,30 @@ async def test_session_not_found_records_failure(setup):
     rec = await mgr.start_recipe_job("NONEXISTENT", "quick", {"v": 1})
     assert rec.status == JobStatus.FAILED
     assert rec.error_class == "not_found"
+
+
+@pytest.mark.asyncio
+async def test_runtimes_cleaned_after_terminal(setup):
+    """v0.5.0.1: Job 終端後に self._runtimes から消える (メモリリーク防止)"""
+    mgr, _, _, _ = setup
+    rec = await mgr.start_recipe_job("TEST::INSTR", "quick", {"v": 5.0})
+    assert rec.job_id in mgr._runtimes  # 実行中は存在
+    # 完了まで待つ
+    for _ in range(40):
+        cur = mgr.get(rec.job_id)
+        if cur.status == JobStatus.COMPLETED:
+            break
+        await asyncio.sleep(0.05)
+    # 少し追加で待って finally の cleanup を確実に
+    await asyncio.sleep(0.1)
+    assert rec.job_id not in mgr._runtimes, "終端後も _runtimes に残っている (リーク)"
+
+
+@pytest.mark.asyncio
+async def test_runtimes_cleaned_after_immediate_failure(setup):
+    """v0.5.0.1: validation 失敗で即 failed になった Job も _runtimes に登録されない"""
+    mgr, _, _, _ = setup
+    rec = await mgr.start_recipe_job("TEST::INSTR", "quick", {})  # 必須 v 欠落 → failed
+    assert rec.status == JobStatus.FAILED
+    # _record_immediate_failure 経路は _runtimes に追加しないので、そもそも入っていない
+    assert rec.job_id not in mgr._runtimes
