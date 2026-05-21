@@ -235,6 +235,12 @@ class InstrumentDefinition(BaseModel):
     recipes: dict[str, RecipeDefinition] = Field(default_factory=dict)
     operational_states: OperationalStates = Field(default_factory=OperationalStates)
     physical_interface: PhysicalInterface = Field(default_factory=PhysicalInterface)
+    # v0.5.0.2 追加: 機器固有の安全停止シーケンス
+    # cancel_mode="safe_shutdown" や emergency_stop で使用される。
+    # 各ステップは RecipeStep と同じ形式 (command または wait)。
+    # 指定がない場合は JobManager._best_effort_safe_shutdown が
+    # set_output OFF / set_voltage 0 を試みる (power_supply 系のみ妥当)。
+    safe_shutdown: list[RecipeStep] = Field(default_factory=list)
 
     @property
     def display_name(self) -> str:

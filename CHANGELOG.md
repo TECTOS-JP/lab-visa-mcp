@@ -1,5 +1,75 @@
 # 変更履歴
 
+## v0.5.0.2 — 外部レビュー対応 (Job 単位排他 + YAML safe_shutdown ほか)
+
+v0.5.0.1 公開後の外部レビューで指摘された P0 二件 + P1 三件 + P2 二件への対処。
+**実験実行基盤として最も重要な「Job 単位での resource 排他」を実装**。
+
+### 重要修正 (P0)
+
+- **Job 単位の resource 排他 (queue 機構)** ── 同一 resource への複数 Job は queued で順番待ち
+  - 旧コード: `VisaManager` の lock は VISA 通信単位のみ。2 Job が同じ電源に対して
+    `set_voltage` → `wait` → `measure_current` を走らせると wait 中に interleave し、
+    測定条件が取り違わる重大バグ
+  - 新コード: `src/visa_mcp/job/scheduler.py` (`ResourceScheduler`) を新設し、Job 単位の
+    queue + active を管理。`_run_job_inner` 全体が resource を占有する
+  - `start_recipe_job(..., queue_policy="queue" | "reject_if_busy")` 引数追加
+  - `get_job_status` の data に `queue.queue_position` / `queue.blocking_job_id` を追加
+  - 内部表現は将来の Group / Map に向けて `required_resources: list[str]` で持つ
+- **`queued` も再起動時に `interrupted` へ遷移** (v0.5.0.1 では running/waiting/cancelling のみ対象)
+
+### 重要修正 (P1)
+
+- **YAML `safe_shutdown` フィールド追加** ── 機器ごとの安全停止シーケンスを YAML で宣言可能
+  - `InstrumentDefinition.safe_shutdown: list[RecipeStep] = []`
+  - `_best_effort_safe_shutdown` は YAML 定義を優先、未定義時のみ既存 fallback
+    (`set_output OFF` + `set_voltage 0`、power_supply 系のみ妥当)
+  - PMX35-3A YAML に明示的に追加
+- **`retry_with_override` 警告強化** ── 危険操作の語気を強める
+  - `requires_human_confirmation: True` フラグ追加
+  - reason に「**LLM が単独で判断・実行することは禁止**」を明記
+  - `ask_human_for_decision` action を retry より前に挿入
+- **server.py instructions に Job 利用導線追加** ── LLM が `execute_recipe` と `start_recipe_job`
+  を使い分けやすいよう、「長時間 / wait を含む / 数十秒以上 → Job を使え」を明示
+
+### バグ修正
+
+- **`asyncio.CancelledError` の state machine 遷移を修正** ── 旧コードは WAITING → CANCELLED を
+  直接遷移していたが state machine では CANCELLING 経由必須。`_safe_transition(CANCELLING)`
+  を挟む形に修正、CancelledError は再 raise してテスト teardown 時の warning を抑制
+
+### その他 (P2)
+
+- **`pyproject.toml` 形式確認** ── `tomllib` で正常 parse 確認済み (raw view の表示問題のみ)
+
+### 新規モジュール / ファイル
+
+- `src/visa_mcp/job/scheduler.py` ── `ResourceScheduler` / `ResourceBusyError` / `QueuePolicy`
+- `tests/test_resource_scheduler.py` (10 件)
+- `tests/test_job_queue_interleave.py` (6 件、再起動 interrupted 含む)
+
+### テスト
+
+- 230 件全パス (v0.5.0.1 の 215 件から +15 件)
+- 統合テストで「同一 resource で 2 Job → 1 つは queued」「異 resource で並列実行」
+  「queued Job のキャンセル」「reject_if_busy で busy 時 failed」などをカバー
+
+### 後方互換
+
+- 既存 MCP ツールのシグネチャ・既存 YAML はすべて変更なしで動作
+- `start_recipe_job` の `queue_policy` 引数は省略可 (default "queue")
+- 「同一 resource Job が直列化」は**意図的な挙動変化**: 旧 v0.5.0.1 では interleave が起きうるバグだった
+
+### 注意事項 (移行ガイド)
+
+- 同一機器に対する Job を **意図的に並列実行していた**場合、v0.5.0.2 では 2 Job 目以降が
+  queued になる。**並列実行に依存していたコードはない想定**だが、もしあれば異なる
+  resource 名 (機器) に分けるか queue_policy="reject_if_busy" で明示的にエラー化を選ぶ
+- `_best_effort_safe_shutdown` は power_supply 系のみ fallback 妥当。**温調器・モータ等は
+  YAML safe_shutdown を明示定義する**こと
+
+---
+
 ## v0.5.0.1 — コードレビュー対応パッチ
 
 v0.5.0 公開後の内部コードレビューで指摘された Bug 2 件と品質改善 3 件への対処。

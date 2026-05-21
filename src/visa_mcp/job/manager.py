@@ -23,6 +23,11 @@ from visa_mcp.job.state_machine import (
     is_terminal,
 )
 from visa_mcp.job.store import JobStore, JobRecord
+from visa_mcp.job.scheduler import (
+    ResourceScheduler,
+    ResourceBusyError,
+    QueuePolicy,
+)
 from visa_mcp.recipe_executor import recipe_to_plan
 from visa_mcp.step_executor import execute_command_step, execute_wait_step
 from visa_mcp.session_manager import SessionManager
@@ -53,6 +58,8 @@ class _JobRuntime:
         self.task = task
         self.cancel_mode: CancelMode | None = None  # 設定されたら cancel 要求中
         self.deadline = deadline                     # time.monotonic() 基準。None なら無期限
+        # v0.5.0.2: queue 待ちから起動可能になった通知用 (None なら未生成)
+        self._start_event: asyncio.Event | None = None
 
     def is_timed_out(self) -> bool:
         return self.deadline is not None and time.monotonic() >= self.deadline
@@ -78,17 +85,24 @@ class JobManager:
         visa: VisaManager,
         session_mgr: SessionManager,
         store: JobStore | None = None,
+        scheduler: ResourceScheduler | None = None,
     ) -> None:
         self._visa = visa
         self._sessions = session_mgr
         self._store = store or JobStore()
         self._runtimes: dict[str, _JobRuntime] = {}
-        # 起動時に running/waiting を interrupted に遷移
+        # v0.5.0.2: Job 単位排他のための ResourceScheduler
+        self._scheduler = scheduler or ResourceScheduler()
+        # 起動時に running/waiting/cancelling/queued を interrupted に遷移
         self._store.mark_interrupted_on_startup()
 
     @property
     def store(self) -> JobStore:
         return self._store
+
+    @property
+    def scheduler(self) -> ResourceScheduler:
+        return self._scheduler
 
     # ---------- public API ----------
 
@@ -102,14 +116,22 @@ class JobManager:
         override_safety: bool = False,
         override_reason: str = "",
         job_timeout_s: float | None = None,
+        queue_policy: QueuePolicy = "queue",
     ) -> JobRecord:
         """
-        recipe を Job として登録し、即座に bg 実行を開始。返り値は登録直後の JobRecord (queued)。
+        recipe を Job として登録し、scheduler 経由で bg 実行を開始する。
+
+        v0.5.0.2 変更: 同一 resource への Job が既に running の場合、
+        新しい Job は **queued** 状態で待機する (queue_policy="queue" デフォルト)。
+        queue_policy="reject_if_busy" を指定すれば busy 時に即 failed を返す。
 
         起動失敗 (定義なし / 必須パラメータ欠落) は SQLite 上で failed として記録した上で返す。
 
         job_timeout_s: 全体の実行制限秒数 (None なら DEFAULT_JOB_TIMEOUT_S = 24h)。
                        経過すると Job は自動で TIMEOUT 状態に遷移する。
+                       wait 中も含む全実行時間が対象。
+        queue_policy: "queue" (デフォルト、busy 時は queued で順番待ち) /
+                      "reject_if_busy" (busy 時は failed)
         """
         parameters = parameters or {}
         session = self._sessions.get_session(resource_name)
@@ -135,7 +157,7 @@ class JobManager:
                     summary=f"必須パラメータ '{p.name}' が指定されていません",
                 )
 
-        # JOB 登録
+        # JOB 登録 (queued 状態)
         job_id = self._new_job_id()
         rec = self._store.create_job(
             job_id=job_id,
@@ -145,22 +167,54 @@ class JobManager:
             parameters=parameters,
         )
 
-        # タイムアウト計算
+        # 内部表現: 将来の Group/Map で複数 resource に拡張可能なよう list 化
+        required_resources = [resource_name]
+
+        # scheduler に投入
+        try:
+            immediate, blocking = await self._scheduler.enqueue(
+                job_id, required_resources, queue_policy=queue_policy,
+            )
+        except ResourceBusyError as e:
+            return self._store.transition_status(
+                job_id, JobStatus.FAILED,
+                error_class="blocked",
+                last_step_summary=f"resource busy (blocked by {e.blocking_job_id})",
+                result={
+                    "success": False,
+                    "error": "ResourceBusy",
+                    "message": str(e),
+                    "blocking_job_id": e.blocking_job_id,
+                    "queue_policy": queue_policy,
+                },
+            )
+
+        # タイムアウト計算 (queued 期間も含む = ユーザー視点での "始めてから")
         effective_timeout = (
             DEFAULT_JOB_TIMEOUT_S if job_timeout_s is None else float(job_timeout_s)
         )
         deadline = time.monotonic() + effective_timeout if effective_timeout > 0 else None
 
-        # バックグラウンド実行開始
+        # バックグラウンドタスクとして起動 (queue 待ちから running まで _run_job 内で管理)
         task = asyncio.create_task(
             self._run_job(
                 rec,
+                required_resources=required_resources,
                 override_safety=override_safety,
                 override_reason=override_reason,
+                start_immediately=immediate,
             ),
             name=f"job-{job_id}",
         )
         self._runtimes[job_id] = _JobRuntime(task, deadline)
+
+        if not immediate:
+            # queue 待ち情報を last_step_summary に
+            self._store.update_step(
+                job_id, -1,
+                last_step_summary=f"queued, blocked_by={blocking}",
+            )
+
         return rec
 
     def get(self, job_id: str) -> JobRecord:
@@ -189,6 +243,8 @@ class JobManager:
         immediate           : asyncio.Task をキャンセル (asyncio.CancelledError)
         after_current_step  : 次の step 開始前にキャンセル
         safe_shutdown       : YAML safe_shutdown を実行してからキャンセル
+
+        v0.5.0.2: queued 状態の Job は scheduler から取り除き、直接 cancelled へ遷移。
         """
         rec = self.get(job_id)
         if is_terminal(rec.status):
@@ -205,18 +261,40 @@ class JobManager:
 
         runtime.cancel_mode = cancel_mode
 
-        # cancelling 状態に遷移 (running/waiting/queued から許可されている)
-        try:
-            self._store.transition_status(
-                job_id, JobStatus.CANCELLING,
-                last_step_summary=f"cancel_mode={cancel_mode.value}",
-            )
-        except Exception:
-            # 既に終端なら無視
-            pass
-
-        if cancel_mode is CancelMode.IMMEDIATE:
+        # v0.5.0.2: queued の場合は scheduler から取り除き、直接 cancelled へ遷移
+        if rec.status == JobStatus.QUEUED:
+            await self._scheduler.cancel_queued(job_id)
+            # 待機中の _wait_until_scheduled を抜けさせる
+            if runtime._start_event is not None:
+                runtime._start_event.set()
+            try:
+                self._store.transition_status(
+                    job_id, JobStatus.CANCELLED,
+                    error_class="cancelled",
+                    last_step_summary=f"cancelled from queued ({cancel_mode.value})",
+                    result={
+                        "success": False, "recipe": rec.recipe,
+                        "cancelled": True, "cancel_mode": cancel_mode.value,
+                    },
+                )
+            except Exception:
+                pass
+            # Task の cleanup (scheduler.on_terminal + _runtimes.pop が finally で走る)
             runtime.task.cancel()
+        else:
+            # 通常 (running/waiting) のキャンセル経路
+            # cancelling 状態に遷移
+            try:
+                self._store.transition_status(
+                    job_id, JobStatus.CANCELLING,
+                    last_step_summary=f"cancel_mode={cancel_mode.value}",
+                )
+            except Exception:
+                # 既に終端なら無視
+                pass
+
+            if cancel_mode is CancelMode.IMMEDIATE:
+                runtime.task.cancel()
 
         # 終端まで待機
         try:
@@ -261,23 +339,58 @@ class JobManager:
         self,
         rec: JobRecord,
         *,
+        required_resources: list[str],
         override_safety: bool,
         override_reason: str,
+        start_immediately: bool,
     ) -> None:
         """Job のバックグラウンド実行本体。
 
-        終端遷移後、self._runtimes から自分のエントリを必ず削除する (メモリリーク防止)。
+        - queue で待っている場合は、scheduler から起動指示が来るまで待機イベントを待つ
+        - 終端遷移後、self._runtimes と scheduler から自分のエントリを必ず削除する
         """
         job_id = rec.job_id
         try:
+            if not start_immediately:
+                # queue 待ち。scheduler 側が次起動可能と判断したら _start_event をセットする
+                await self._wait_until_scheduled(job_id)
+
+            # 起動可能 → scheduler に running 通知
+            await self._scheduler.on_running(job_id)
+
             await self._run_job_inner(
                 rec,
                 override_safety=override_safety,
                 override_reason=override_reason,
             )
         finally:
+            # 終端 Job の resource 解放と次 Job 起動
+            try:
+                next_jobs = await self._scheduler.on_terminal(job_id, required_resources)
+                for nj_id in next_jobs:
+                    self._wake_queued_job(nj_id)
+            except Exception as e:
+                logger.warning("scheduler on_terminal で例外: %s", e)
             # v0.5.0.1 fix: 終端 Job の Task 参照を解放してメモリリークを防ぐ
             self._runtimes.pop(job_id, None)
+
+    async def _wait_until_scheduled(self, job_id: str) -> None:
+        """queue 待ち中の Job を、起動可能になるまで sleep で待たせる。
+        cancel が来たら CancelledError が伝播するので、それで抜ける。
+        """
+        runtime = self._runtimes.get(job_id)
+        if runtime is None:
+            return
+        if runtime._start_event is None:
+            runtime._start_event = asyncio.Event()
+        await runtime._start_event.wait()
+
+    def _wake_queued_job(self, job_id: str) -> None:
+        """queue 先頭になった Job のイベントをセットして実行を開始させる。"""
+        runtime = self._runtimes.get(job_id)
+        if runtime is None or runtime._start_event is None:
+            return
+        runtime._start_event.set()
 
     async def _run_job_inner(
         self,
@@ -430,17 +543,27 @@ class JobManager:
             )
 
         except asyncio.CancelledError:
-            # immediate cancel
-            self._store.transition_status(
-                job_id, JobStatus.CANCELLED,
-                error_class="cancelled",
-                last_step_summary="cancelled (immediate)",
-                result={
-                    "success": False, "recipe": rec.recipe,
-                    "steps_executed": step_results,
-                    "cancelled": True, "cancel_mode": "immediate",
-                },
-            )
+            # immediate cancel または asyncio runtime teardown による cancel
+            # state machine: WAITING/RUNNING/CANCELLING のいずれからも CANCELLED へ向かう。
+            # CANCELLED への直接遷移は CANCELLING からのみ許可されているので、
+            # まず CANCELLING を経由する。既に CANCELLING / 終端なら _safe_transition でスキップ。
+            self._safe_transition(job_id, JobStatus.CANCELLING)
+            try:
+                self._store.transition_status(
+                    job_id, JobStatus.CANCELLED,
+                    error_class="cancelled",
+                    last_step_summary="cancelled (immediate)",
+                    result={
+                        "success": False, "recipe": rec.recipe,
+                        "steps_executed": step_results,
+                        "cancelled": True, "cancel_mode": "immediate",
+                    },
+                )
+            except Exception:
+                # 既に終端なら無視 (queued path で既に CANCELLED 等)
+                pass
+            # CancelledError を再 raise しないと teardown 時に warning が出る
+            raise
         except Exception as e:
             logger.exception("Job %s で予期しないエラー", job_id)
             self._store.transition_status(
@@ -549,10 +672,26 @@ class JobManager:
         )
 
     async def _best_effort_safe_shutdown(self, session) -> str:
-        """汎用的な安全停止: set_output(OFF) と set_voltage(0) を試みる。"""
-        attempts: list[str] = []
+        """安全停止を実行する。
+
+        優先順位 (v0.5.0.2):
+          1. YAML の `safe_shutdown` セクションに定義されたシーケンス (機器ごとに任意定義)
+          2. 上記が無い場合のみ、power_supply 系を想定した既存 fallback
+             (set_output OFF + set_voltage 0)
+
+        温調器・モータ・電子負荷等は fallback では危険なので、必ず YAML 定義を推奨する。
+        """
         if session is None or session.definition is None:
             return "no session"
+
+        # 1. YAML 定義された safe_shutdown を優先
+        if session.definition.safe_shutdown:
+            return await self._run_yaml_shutdown(
+                session, session.definition.safe_shutdown,
+            )
+
+        # 2. Fallback: power_supply 想定の最小 best-effort
+        attempts: list[str] = ["fallback=power_supply_default"]
         for cmd_name, args in [
             ("set_output", {"state": "OFF"}),
             ("set_voltage", {"voltage": 0}),
@@ -565,12 +704,35 @@ class JobManager:
                 r = await execute_command_step(
                     self._visa, session, step,
                     override_safety=True,
-                    override_reason="safe_shutdown by cancel",
+                    override_reason="safe_shutdown by cancel (fallback)",
                 )
                 attempts.append(f"{cmd_name}:{'ok' if r.get('success') else 'fail'}")
             except Exception as e:
                 attempts.append(f"{cmd_name}:err({type(e).__name__})")
-        return ",".join(attempts) if attempts else "no shutdown commands available"
+        if len(attempts) == 1:  # fallback タグだけ
+            return "no shutdown commands available"
+        return ",".join(attempts)
+
+    async def _run_yaml_shutdown(self, session, steps: list) -> str:
+        """YAML 定義の safe_shutdown ステップを順次実行 (override_safety=True)"""
+        results: list[str] = ["source=yaml"]
+        for idx, rs in enumerate(steps):
+            try:
+                if rs.step_type == "wait":
+                    seconds = float(rs.wait.get("seconds", 0))
+                    await asyncio.sleep(seconds)
+                    results.append(f"wait_{seconds}s:ok")
+                else:
+                    step = CommandStep(command=rs.command or "", args=rs.args)
+                    r = await execute_command_step(
+                        self._visa, session, step,
+                        override_safety=True,
+                        override_reason="safe_shutdown by cancel (YAML)",
+                    )
+                    results.append(f"{rs.command}:{'ok' if r.get('success') else 'fail'}")
+            except Exception as e:
+                results.append(f"step{idx}:err({type(e).__name__})")
+        return ",".join(results)
 
     def _safe_transition(self, job_id: str, to: JobStatus) -> None:
         """遷移ルール違反は黙って無視 (cancelling 中の状態変更等)"""

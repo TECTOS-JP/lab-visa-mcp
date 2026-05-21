@@ -79,7 +79,15 @@ def _recommended_actions_for(rec) -> list[dict]:
                 "action": "review_safety_constraints",
                 "tool": "list_safety_constraints",
                 "args": {"resource_name": rec.resource_name},
-                "reason": "違反した安全制約の内容を確認",
+                "reason": "違反した安全制約の内容を確認 (まずこちらを推奨)",
+            })
+            actions.append({
+                "action": "ask_human_for_decision",
+                "reason": (
+                    "安全制約違反のため、override するか諦めるかは "
+                    "**人間の判断を仰ぐ必要がある**。LLM が単独で次の retry_with_override を"
+                    "選んではいけない"
+                ),
             })
             actions.append({
                 "action": "retry_with_override",
@@ -89,9 +97,14 @@ def _recommended_actions_for(rec) -> list[dict]:
                     "recipe_name": rec.recipe,
                     "parameters": rec.parameters,
                     "override_safety": True,
-                    "override_reason": "<ユーザー確認済みの理由>",
+                    "override_reason": "<人間が明示的に承認した理由を必ず記入>",
                 },
-                "reason": "advisory モードかつ明示的な理由がある場合に限り override 可",
+                "requires_human_confirmation": True,
+                "reason": (
+                    "⚠️ 危険操作: 安全制約を意図的に無視する。"
+                    "**advisory モード時かつ人間が事前に明示的に承認した場合のみ**実行可能。"
+                    "LLM が単独で判断・実行することは禁止"
+                ),
             })
         elif err == "validation":
             actions.append({
@@ -203,7 +216,8 @@ def register_tools(mcp: FastMCP, job_mgr: JobManager) -> None:
 
         返却フィールド (data):
           status / current_step_index / last_step_summary /
-          error_class / created_at / updated_at / is_terminal
+          error_class / created_at / updated_at / is_terminal /
+          queue (status=queued の場合に queue_position / blocking_job_id を含む)
         """
         try:
             rec = job_mgr.get(job_id)
@@ -212,23 +226,28 @@ def register_tools(mcp: FastMCP, job_mgr: JobManager) -> None:
                 "error",
                 errors=[make_error("not_found", f"job not found: {job_id}", recoverable=False)],
             )
-        return make_envelope(
-            "ok",
-            data={
-                "job_id": rec.job_id,
-                "status": rec.status.value,
-                "is_terminal": is_terminal(rec.status),
-                "current_step_index": rec.current_step_index,
-                "last_step_summary": rec.last_step_summary,
-                "error_class": rec.error_class,
-                "owner": rec.owner,
-                "resource_name": rec.resource_name,
-                "recipe": rec.recipe,
-                "created_at": rec.created_at,
-                "updated_at": rec.updated_at,
-            },
-            job_id=rec.job_id,
-        )
+        data = {
+            "job_id": rec.job_id,
+            "status": rec.status.value,
+            "is_terminal": is_terminal(rec.status),
+            "current_step_index": rec.current_step_index,
+            "last_step_summary": rec.last_step_summary,
+            "error_class": rec.error_class,
+            "owner": rec.owner,
+            "resource_name": rec.resource_name,
+            "recipe": rec.recipe,
+            "created_at": rec.created_at,
+            "updated_at": rec.updated_at,
+        }
+        # v0.5.0.2: queued 状態時に queue 情報を付与
+        if rec.status == JobStatus.QUEUED:
+            try:
+                qinfo = await job_mgr.scheduler.get_queue_info(rec.job_id)
+                if qinfo is not None:
+                    data["queue"] = qinfo
+            except Exception:
+                pass
+        return make_envelope("ok", data=data, job_id=rec.job_id)
 
     @mcp.tool()
     async def get_job_result(job_id: str) -> dict:

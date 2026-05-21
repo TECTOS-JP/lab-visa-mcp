@@ -20,6 +20,7 @@ from visa_mcp.job.state_machine import (
 )
 from visa_mcp.job.store import JobStore, JobRecord
 from visa_mcp.job.manager import JobManager
+from visa_mcp.job.scheduler import ResourceScheduler, ResourceBusyError, QueuePolicy
 
 __all__ = [
     "JobStatus",
@@ -30,4 +31,7 @@ __all__ = [
     "JobStore",
     "JobRecord",
     "JobManager",
+    "ResourceScheduler",
+    "ResourceBusyError",
+    "QueuePolicy",
 ]

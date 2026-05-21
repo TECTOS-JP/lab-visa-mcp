@@ -24,6 +24,13 @@ connection:
   read_termination: "\n"
   write_termination: "\n"
 
+# ===== 安全停止シーケンス (v0.5.0.2) =====
+# cancel_mode="safe_shutdown" / emergency_stop 時に実行される。
+# PMX-A シリーズでは出力 OFF → 電圧 0 設定が標準。
+safe_shutdown:
+  - { command: "set_output", args: { state: "OFF" } }
+  - { command: "set_voltage", args: { voltage: 0 } }
+
 # ===== 機器仕様 (v0.2.0) =====
 specifications:
   outputs:

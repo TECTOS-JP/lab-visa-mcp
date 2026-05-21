@@ -266,10 +266,17 @@ class JobStore:
 
     def mark_interrupted_on_startup(self) -> int:
         """
-        起動時に running/waiting/cancelling だった Job を interrupted に遷移させる。
+        起動時に queued/running/waiting/cancelling だった Job を interrupted に遷移させる。
         返り値: 遷移させた Job 数。
+
+        v0.5.0.2: queued も対象に追加。queued Job がプロセス落ち直前に登録されたケースを救う。
         """
-        active = [JobStatus.RUNNING.value, JobStatus.WAITING.value, JobStatus.CANCELLING.value]
+        active = [
+            JobStatus.QUEUED.value,
+            JobStatus.RUNNING.value,
+            JobStatus.WAITING.value,
+            JobStatus.CANCELLING.value,
+        ]
         now = _now_iso()
         with self._write_lock:
             cur = self._connect().execute(
