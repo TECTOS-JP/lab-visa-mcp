@@ -1,5 +1,47 @@
 # 変更履歴
 
+## v0.5.0.3 — 内部レビュー (Job queue のレース条件修正)
+
+v0.5.0.2 公開後の内部コードレビューで検出された 2 件のレース条件への対処パッチ。
+機能追加なし、API 変化なし。
+
+### バグ修正
+
+- **Lost wake-up race の修正** (High)
+  - 旧コード: `_JobRuntime._start_event` を `_wait_until_scheduled` で遅延生成
+  - 問題: `start_recipe_job` 直後・task 実行前に別 Job の `on_terminal` が
+    `_wake_queued_job` を呼んでも、`_start_event` が `None` のため wake が失われる。
+    キューに並んだ Job が**永久に queued のまま起動しない**。
+  - 修正: `_JobRuntime.__init__` で `asyncio.Event()` を eagerly 生成。
+    `_wait_until_scheduled` / `_wake_queued_job` / `cancel()` の None チェックを削除。
+- **Cancel-immediate レースの state machine 違反修正** (Medium)
+  - 旧コード: immediate=True で active 登録後・task 実行前に `cancel` 呼び出し →
+    ステータスを QUEUED → CANCELLED に遷移後、task が `_run_job_inner` を実行 →
+    `transition_status(RUNNING)` で **CANCELLED → RUNNING の不正遷移** を試行 →
+    ログにエラーが出力される (最終的には finally で resource は解放)
+  - 修正: `_run_job_inner` 入口で `is_terminal(current.status)` をチェック、
+    既に終端なら何もせずに return。state machine 違反ログを抑制。
+
+### テスト追加
+
+- `tests/test_job_race_conditions.py` (5 件)
+  - `test_event_eagerly_created`: `_JobRuntime.__init__` で event 生成確認
+  - `test_no_lost_wake_when_predecessor_terminates_fast`: 連続 Job 投入で 2 番目が
+    永久 queued にならないこと
+  - `test_cancel_immediate_after_start_no_state_violation`: 即 cancel で
+    state 違反ログが出ないこと
+  - `test_cancel_queued_no_state_violation`: queued Job の cancel 経路で同上
+  - `test_three_jobs_serialized`: 3 連続 Job が全て完走
+
+合計 208 件パス (v0.5.0.2 の 203 件から +5)。
+
+### 後方互換
+
+- API 変化なし、既存 Job / Recipe / YAML はすべて変更なしで動作
+- 動作上の変化は「永久 queued バグの解消」と「不要なログの抑制」のみ
+
+---
+
 ## v0.5.0.2 — 外部レビュー対応 (Job 単位排他 + YAML safe_shutdown ほか)
 
 v0.5.0.1 公開後の外部レビューで指摘された P0 二件 + P1 三件 + P2 二件への対処。

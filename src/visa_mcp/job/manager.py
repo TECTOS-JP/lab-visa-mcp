@@ -58,8 +58,13 @@ class _JobRuntime:
         self.task = task
         self.cancel_mode: CancelMode | None = None  # 設定されたら cancel 要求中
         self.deadline = deadline                     # time.monotonic() 基準。None なら無期限
-        # v0.5.0.2: queue 待ちから起動可能になった通知用 (None なら未生成)
-        self._start_event: asyncio.Event | None = None
+        # v0.5.0.3: queue 待ちから起動可能になった通知用。
+        # 旧コード (v0.5.0.2) は _wait_until_scheduled で遅延生成していたが、
+        # start_recipe_job 直後・task 実行前に on_terminal 経由の _wake_queued_job が
+        # 走ると runtime._start_event が None で wake が失われる lost-wake-up が
+        # 発生していた。eager 生成で解消する。
+        # immediate=True の Job では event.set() しても誰も待たないので影響なし。
+        self._start_event: asyncio.Event = asyncio.Event()
 
     def is_timed_out(self) -> bool:
         return self.deadline is not None and time.monotonic() >= self.deadline
@@ -264,9 +269,8 @@ class JobManager:
         # v0.5.0.2: queued の場合は scheduler から取り除き、直接 cancelled へ遷移
         if rec.status == JobStatus.QUEUED:
             await self._scheduler.cancel_queued(job_id)
-            # 待機中の _wait_until_scheduled を抜けさせる
-            if runtime._start_event is not None:
-                runtime._start_event.set()
+            # 待機中の _wait_until_scheduled を抜けさせる (v0.5.0.3: event は常に存在)
+            runtime._start_event.set()
             try:
                 self._store.transition_status(
                     job_id, JobStatus.CANCELLED,
@@ -377,18 +381,19 @@ class JobManager:
     async def _wait_until_scheduled(self, job_id: str) -> None:
         """queue 待ち中の Job を、起動可能になるまで sleep で待たせる。
         cancel が来たら CancelledError が伝播するので、それで抜ける。
+        v0.5.0.3: _start_event は _JobRuntime.__init__ で eagerly 生成済み。
         """
         runtime = self._runtimes.get(job_id)
         if runtime is None:
             return
-        if runtime._start_event is None:
-            runtime._start_event = asyncio.Event()
         await runtime._start_event.wait()
 
     def _wake_queued_job(self, job_id: str) -> None:
-        """queue 先頭になった Job のイベントをセットして実行を開始させる。"""
+        """queue 先頭になった Job のイベントをセットして実行を開始させる。
+        v0.5.0.3: event は常に存在するため None チェック不要。
+        """
         runtime = self._runtimes.get(job_id)
-        if runtime is None or runtime._start_event is None:
+        if runtime is None:
             return
         runtime._start_event.set()
 
@@ -399,9 +404,25 @@ class JobManager:
         override_safety: bool,
         override_reason: str,
     ) -> None:
-        """Job のバックグラウンド実行本体 (内部)。終端遷移を含む全状態管理。"""
+        """Job のバックグラウンド実行本体 (内部)。終端遷移を含む全状態管理。
+
+        v0.5.0.3: 入口で終端ガードを追加。
+        immediate=True で task 起動前に cancel された場合等、
+        ステータスが既に CANCELLED 等になっていた場合は何もせずに return する
+        (state machine 違反による不要なログ出力を防止)。
+        """
         job_id = rec.job_id
         runtime = self._runtimes[job_id]
+
+        # v0.5.0.3: 既に終端状態 (cancelled / failed / interrupted / timeout) なら何もしない
+        current = self._store.get(job_id)
+        if current is not None and is_terminal(current.status):
+            logger.debug(
+                "_run_job_inner: job %s は既に終端 (%s) のため処理スキップ",
+                job_id, current.status.value,
+            )
+            return
+
         session = self._sessions.get_session(rec.resource_name)
 
         # session 検証 (start_recipe_job で確認済みだが double check)
