@@ -2218,8 +2218,12 @@ class JobManager:
         steps_to_execute_view = []
         for i, s in enumerate(remaining):
             if isinstance(s, dict):
+                # v0.9.0.1: step_path を追加 (LLM が original DSL の参照位置を
+                # 特定しやすいように)。MVP では top-level の単純 path のみ。
+                idx = requested + i
                 steps_to_execute_view.append({
-                    "step_index": requested + i,
+                    "step_index": idx,
+                    "step_path": f"steps[{idx}]",
                     "type": s.get("type"),
                     "instrument": s.get("instrument"),
                     "command": s.get("command"),
@@ -2260,22 +2264,51 @@ class JobManager:
                 }]
             return data
 
-        # ---- 6. safe_shutdown_before_resume (best effort) ----
+        # ---- 6. safe_shutdown_before_resume ----
+        # v0.9.0.1 (P1): 失敗時は resume を中止する (実装方針 #12 推奨仕様)。
+        # best-effort という名前だが、resume 前 safe_shutdown は安全確保が目的
+        # なので、ここで失敗を黙認すると危険な状態のまま resume が走る。
         if safe_shutdown_before_resume:
             shutdown_results = []
+            any_fail = False
             for r in required:
                 try:
                     session = self._sessions.get_session(r)
                     if session is not None:
                         sd = await self._best_effort_safe_shutdown(session)
                         shutdown_results.append({"resource": r, **sd})
+                        if not sd.get("success", sd.get("ok", False)):
+                            any_fail = True
                 except Exception as e:
                     shutdown_results.append({"resource": r, "ok": False,
                                               "error": str(e)})
+                    any_fail = True
             warnings.append({
                 "warning_class": "safe_shutdown_applied_before_resume",
                 "results": shutdown_results,
             })
+            if any_fail:
+                return {
+                    "resume_ready": False,
+                    "original_job_id": job_id,
+                    "suggested_from_step": suggested,
+                    "requested_from_step": from_step,
+                    "warnings": warnings,
+                    "errors": [{
+                        "error_class": "safe_shutdown_failed",
+                        "message": (
+                            "safe_shutdown_before_resume が一部 resource で失敗。"
+                            "resume を中止しました。機器状態を確認してから再試行してください"
+                        ),
+                        "details": {"shutdown_results": shutdown_results},
+                        "recommended_next_actions": [
+                            {"action": "check_instrument_state",
+                             "tool": "get_state"},
+                            {"action": "retry_without_safe_shutdown_before_resume",
+                             "reason": "shutdown を明示スキップして手動で機器停止後に再試行"},
+                        ],
+                    }],
+                }
 
         # ---- 7. 新規 Job を作って残り steps を実行 ----
         resume_marker = {

@@ -96,6 +96,13 @@ class Fixtures(BaseModel):
     instruments: list[str] = Field(default_factory=list)
     mock_scenarios: dict[str, Any] | None = None
     templates: list[dict[str, Any]] = Field(default_factory=list)
+    # v0.9.0.1: benchmark 再現性確保のための seed (mock の random / asyncio jitter
+    # 等に影響)。指定しない場合は None で OS 既定 (再現性は保証されない)。
+    random_seed: int | None = None
+    # v0.9.0.1: benchmark 実行時の安全モード (mock との組み合わせで挙動が
+    # 変わる箇所がある。例: strict なら verify 失敗で step_failed になり
+    # job_status=failed に到達する)。None なら環境変数を尊重。
+    safety_mode: str | None = None
 
 
 # ============================================================

@@ -378,7 +378,10 @@ def build_run_summary(
     verify_passed = 0
     verify_failed = 0
     for s in steps:
-        r = s.get("result") or {}
+        # v0.9.0.1: strict mode で verify が失敗すると step status=failed となり
+        # result ではなく error に verify 情報が入る (step_executor 仕様)。
+        # 両方を見るように修正。
+        r = s.get("result") or s.get("error") or {}
         if not isinstance(r, dict):
             continue
         v = r.get("verify")

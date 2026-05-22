@@ -1,3 +1,9 @@
+# v0.9.0.1: benchmark / test temp files
+.tmp/
+benchmarks/.tmp/
+*.sqlite
+*.sqlite3
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

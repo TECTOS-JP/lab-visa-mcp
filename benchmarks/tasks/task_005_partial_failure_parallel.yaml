@@ -1,4 +1,4 @@
-id: task_005_partial_failure_group
+id: task_005_partial_failure_parallel
 title: Parallel branches with one timeout → partial_failure
 description: >
   parallel 2 branch のうち 1 つが timeout する scenario。job_status=completed だが

@@ -170,6 +170,14 @@ class BenchmarkRunner:
     async def _run(
         self, task: BenchmarkTask, result: BenchmarkResult,
     ) -> None:
+        # v0.9.0.1: random seed (mock の noise 等を再現可能に)
+        if task.fixtures.random_seed is not None:
+            import random
+            random.seed(task.fixtures.random_seed)
+        # v0.9.0.1: 安全モードを task ごとに override 可能に
+        if task.fixtures.safety_mode:
+            import os
+            os.environ["VISA_MCP_SAFETY_MODE"] = task.fixtures.safety_mode
         # ---- fixture 解決 ----
         sys_cfg = SystemConfig()
         if task.fixtures.system_config:

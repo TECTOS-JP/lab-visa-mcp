@@ -454,7 +454,10 @@ def register_tools(mcp: FastMCP, job_mgr: JobManager) -> None:
 
         引数:
           job_id: 再開元の元 Job
-          from_step: 再開する **top-level step index** (DSL `steps[]`)。
+          from_step: 再開する **DSL top-level step index** (original_plan の
+                     `steps[]` における 0-origin index)。sweep 展開後の
+                     IR step index ではなく、**LLM が書いた original DSL の
+                     steps[] index** を指す (v0.9.0.1 で明文化)。
                      `None` の場合は実行されず、`suggested_from_step` を返すだけ。
           dry_run: True で Job を起動せず steps_to_execute / required_resources
                    / warnings を返す。AI/人間が再開内容を事前確認するため。

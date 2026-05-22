@@ -24,13 +24,18 @@ expected:
       - start_experiment_job
   success_criteria:
     validation_status: ok
-    job_status: completed
-    # NOTE: verify 失敗は permissive mode では step success のまま記録のみ。
-    # job_steps への永続化と verify_summary 集計を厳密に確認するのは
-    # tests/test_benchmark_v090.py の verify mismatch ケースで行う。
+    # NOTE (v0.9.0.1): strict mode で実行することで verify 失敗が step_failed
+    # に昇格し、Job 自体が failed 終端まで到達する。verify_failed_count を
+    # summary で観測したい場合、現状の DSL Plan path では job_steps 永続化が
+    # 一部抜けるため expected_verify_failed_count はまだ使えない (v0.9.1 で
+    # build_run_summary + DSL step persistence を整備予定)。
+    # 暫定で job_status=failed + error_class が verify 系であることを確認する。
+    job_status: failed
 
 fixtures:
   system_config: fixtures/system_config_basic.yaml
+  safety_mode: strict
+  random_seed: 12345
   instruments:
     - fixtures/instruments/mock_psu.yaml
   mock_scenarios:

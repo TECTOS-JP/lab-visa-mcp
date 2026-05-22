@@ -48,7 +48,7 @@ def test_load_all_tasks():
     assert len(tasks) >= 5
     ids = [t.id for t in tasks]
     assert "task_001_basic_validate_dry_run" in ids
-    assert "task_005_partial_failure_group" in ids
+    assert "task_005_partial_failure_parallel" in ids
 
 
 # =========================================================
@@ -153,7 +153,7 @@ async def test_benchmark_template_override_passes(tmp_path):
 @pytest.mark.asyncio
 async def test_benchmark_partial_failure_detected(tmp_path):
     res = await run_task_file(
-        BENCHMARKS / "tasks" / "task_005_partial_failure_group.yaml",
+        BENCHMARKS / "tasks" / "task_005_partial_failure_parallel.yaml",
         BENCHMARKS, tmp_path,
     )
     # job_outcome=partial_failure を実際に検出できる

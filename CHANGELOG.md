@@ -1,5 +1,61 @@
 # 変更履歴
 
+## v0.9.0.1 — Benchmark / Resume レビュー対応 (P0/P1)
+
+v0.9.0 外部レビュー指摘を P0/P1 で対応。新規 MCP ツールなし。互換維持
+(experimental スコープ内の改善)。
+
+### P0 改修
+
+- **`.tmp/benchmark_db/*.sqlite` の untrack** + `.gitignore` に `.tmp/`
+  `benchmarks/.tmp/` `*.sqlite` `*.sqlite3` を追記。Benchmark 実行時の
+  生成物がリポジトリに混入していた問題を解消。
+- raw 改行確認 (該当ファイル全て LF only / CR=0)。
+
+### P1 改修
+
+- **`task_005_partial_failure_group.yaml` → `task_005_partial_failure_parallel.yaml`
+  にリネーム**: parallel branch 1 つが timeout する scenario であり、
+  Group/Map の partial_failure とは別概念。命名を実装に合わせた。
+  (Group/Map 用 partial_failure task は v0.9.1 で追加予定)
+- **`Fixtures.random_seed` フィールド**: benchmark task YAML で
+  `fixtures.random_seed: 12345` を指定すると runner が `random.seed()` を
+  設定し、mock の `stable` / `stable_after` 等の noise を再現可能に。
+- **`Fixtures.safety_mode` フィールド**: benchmark task ごとに safety mode
+  (`strict` / `advisory` / `permissive`) を override 可能。strict が必要な
+  verify mismatch シナリオで使う。
+- **`task_004_verify_mismatch.yaml` を strict mode + seed で再構成**:
+  permissive では verify mismatch が step success のまま記録のみだったため、
+  strict mode を指定して job_status=failed まで到達するように。
+- **`build_run_summary` が step error も verify 情報源に**: strict mode で
+  step が failed になる場合 verify 情報は `error` 側に入るため、両方を
+  走査するように修正。
+- **`resume_job` の `safe_shutdown_before_resume=True` 失敗時は resume 中止**:
+  v0.9.0 では warning 記録のみだったが、レビュー指摘 (実装方針 #12 推奨仕様)
+  に合わせ、shutdown 失敗時は `error_class=safe_shutdown_failed` を返して
+  Job 起動を阻止するよう変更。
+- **`resume_job` の docstring に `from_step` の意味を明示**: DSL top-level
+  step index (original_plan の `steps[]` 0-origin index) と明文化。
+- **`resume_job(dry_run)` の `steps_to_execute` に `step_path` を追加**:
+  LLM が original DSL の参照位置を特定しやすいよう `step_path: "steps[N]"`
+  を併記。
+
+### テスト
+
+- `tests/test_v0901_review.py` 7 件 (Fixtures.random_seed / safety_mode /
+  task_005 rename / resume step_path / safe_shutdown 失敗時の中止 / 成功時
+  続行 / runner safety_mode override)
+- task_005 名称変更に伴い `tests/test_benchmark_v090.py` 更新
+- **合計 494 件 passing** (v0.9.0: 487 → v0.9.0.1: 494)
+
+### 互換性
+
+- benchmark task YAML への新フィールドは optional (既存 task は無変更で動作)
+- `resume_job` の動作変更 (safe_shutdown 失敗時の中止) は experimental スコープ
+- Stable API 不変
+
+---
+
 ## v0.9.0 — Agent Benchmark 基盤 + Job resume MVP
 
 合言葉:「**AI を呼ぶ前に、AI を評価できる実験場を作る**」。LLM を呼ばなくても
