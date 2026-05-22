@@ -101,6 +101,21 @@ v1.x 内で **名称・引数・response 構造を固定**。破壊的変更は 
 
 現在 deprecated 候補は無し。v0.9.x で発生したら本ドキュメントに追記する。
 
+## v0.8.3.1 メモ
+
+- `apply_template_override` を **deepcopy 化** (template 副作用防止)。
+- `start_experiment_job_from_template` のレスポンス `data` に **`owner`**
+  (実際に Job に反映された owner) を追加。**`override.owner` 指定時は
+  関数引数 `owner` より優先**される (従来は override.owner が黙って捨て
+  られていた)。動作変更だが experimental スコープのため即時反映。
+- `template_source.template_version` は **DSL schema バージョンを流用**
+  している現状を docs に明記。v0.9.x で template 改訂番号 (`template_revision`)
+  を独立フィールドとして導入する余地を残す。
+- `raw_resource_used_with_unit` は v0.8.3 では **warning** だが、v1.0 候補
+  検討時に safety_mode=strict で error に昇格させる案を保留。
+- `override.parameters` → `expanded_plan.variables` への shallow merge である
+  ことを docs に明記。
+
 ## v0.8.2.1 メモ
 
 外部レビューに応答した変更 (互換維持):

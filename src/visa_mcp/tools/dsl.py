@@ -389,11 +389,14 @@ def register_tools(
                 envelope_status, data=data, errors=envelope_errors,
             )
 
+        # v0.8.3.1: override.owner が指定されていればそれを優先 (P2)
+        effective_owner = applied_summary.get("owner") or owner
+
         # 実行
         try:
             rec = await job_mgr.start_experiment_job(
                 plan_dict=expanded_plan,
-                owner=owner,
+                owner=effective_owner,
                 override_safety=override_safety,
                 override_reason=override_reason,
                 job_timeout_s=(job_timeout_s if job_timeout_s > 0 else None),
@@ -410,6 +413,7 @@ def register_tools(
         data = {
             "job_id": rec.job_id,
             "status": rec.status.value,
+            "owner": rec.owner or effective_owner,
             "name": expanded_plan.get("name", ""),
             "dsl_version": expanded_plan.get("dsl_version", CURRENT_DSL_VERSION),
             "created_at": rec.created_at,

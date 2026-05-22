@@ -1,5 +1,62 @@
 # 変更履歴
 
+## v0.8.3.1 — DSL usability refinement レビュー対応 (P1/P2)
+
+v0.8.3 外部レビューの P1/P2 指摘に対応。新規 MCP ツールなし、互換維持
+(experimental スコープ内の動作変更のみ)。
+
+### P0 確認
+
+- raw 改行問題: ローカル該当ファイル (`schema.py` / `compiler.py` /
+  `template.py` / `tools/dsl.py` / `test_dsl_v083.py` / 例 README /
+  `dsl.schema.json`) は **すべて LF only / CR=0 / 複数行** で正常確認
+  (GitHub raw 表示の見え方は viewer 側の問題で、リポジトリ実体は正常)。
+- `schemas/dsl.schema.json` は既に `indent=2` で pretty-print 済 (721 行)。
+
+### P1 改修
+
+- **`apply_template_override` を deepcopy 化**: 従来は `dict(template_plan)`
+  での top-level shallow copy だったため、`steps` / `variables` / `bindings`
+  内側の dict / list を expanded と template が共有していた。
+  `from copy import deepcopy` で完全コピー化、template への副作用を排除。
+- **`start_experiment_job_from_template` レスポンスに `owner` を明示**:
+  data 直下に「実際に Job に反映された owner」を返却。
+- **`override.owner` を関数引数 `owner` より優先** (動作変更):
+  v0.8.3 では `override.owner` が `apply_template_override` の summary に
+  入るだけで Job 起動には未反映 (黙って捨てられていた) だった。
+  v0.8.3.1 から `effective_owner = override.owner or 関数引数 owner` で
+  Job 起動。experimental スコープのため即時反映。
+- **`docs/dsl/examples/template_override/README.md` に名称対応表追記**:
+  `override.parameters` ↔ `expanded_plan.variables`, `override.owner` ↔
+  `jobs.owner` (Plan には埋め込まれない) など 5 行の対応関係を明文化。
+- **`$role` 推奨ルールを docs に明記**: unit / bindings を使う場合は
+  `instrument: "$psu"` のように `$` prefix 必須。`"psu"` だと alias / resource
+  fallback パスに乗るため、unit role 解決がスキップされる可能性がある。
+- **`template_version` ≠ `template_revision` 注記**: 現状 template の
+  `dsl_version` を `template_source.template_version` に流用しているが、
+  本来別概念。v0.9.x で template 改訂番号を独立フィールドとして導入する
+  余地を残す旨を docs に明記。
+
+### P2 改修
+
+- **`raw_resource_used_with_unit` を v1.0 候補メモに追加**:
+  v0.8.3 では warning だが、v1.0 candidate 検討時に safety_mode=strict で
+  error 昇格を保留候補として `docs/compatibility.md` に記録。
+
+### テスト
+
+`tests/test_dsl_v0831.py` 5 件追加 (deepcopy / steps not shared / owner 明示 /
+override.owner 優先 / dry_run で DB 上 template 不変)。
+**合計 465 件 passing** (v0.8.3: 460 → v0.8.3.1: 465)。
+
+### 互換性
+
+- 純粋追加 (`data.owner`) + experimental スコープ内の動作変更
+  (`override.owner` 優先) のみ。
+- Stable API は不変。
+
+---
+
 ## v0.8.3 — DSL usability refinement (unit + template override)
 
 合言葉:「DSL の能力を増やすのではなく、LLM が少ない指定で正しい Plan を書ける

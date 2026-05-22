@@ -19,6 +19,7 @@ Override 仕様 (実装方針 #8):
     - parallel.branches の書き換え
 """
 from __future__ import annotations
+from copy import deepcopy
 from typing import Any
 
 
@@ -72,8 +73,10 @@ def apply_template_override(
             rejected_keys=rejected,
         )
 
-    # template の shallow copy (top-level のみ) で expanded を構築
-    expanded: dict[str, Any] = dict(template_plan)
+    # v0.8.3.1: template を deepcopy (steps / variables 共有を避けるため)。
+    # template は保存済み再利用物。expanded を後段で加工しても元 template に
+    # 副作用が及ばないことを保証する。
+    expanded: dict[str, Any] = deepcopy(template_plan)
     applied_keys: list[str] = []
 
     if "name" in override and override["name"] is not None:
