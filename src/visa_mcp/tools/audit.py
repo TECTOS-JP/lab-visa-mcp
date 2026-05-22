@@ -19,6 +19,20 @@ logger = logging.getLogger(__name__)
 def register_tools(mcp: FastMCP, job_mgr: JobManager) -> None:
     audit = AuditStore(job_mgr.store)
 
+    def _audit_unavailable_response() -> dict | None:
+        """v0.9.3.1: AuditStore init 失敗時 (visibility のため明示 envelope)"""
+        if getattr(job_mgr, "_audit_init_error", False) and job_mgr.audit is None:
+            return make_envelope(
+                "error",
+                errors=[make_error(
+                    "internal",
+                    "AuditStore が初期化されていません。audit / locks 機能は無効です",
+                    recoverable=False,
+                    details={"sub_class": "audit_unavailable"},
+                )],
+            )
+        return None
+
     @mcp.tool()
     async def query_audit(
         job_id: str = "",
@@ -46,6 +60,9 @@ def register_tools(mcp: FastMCP, job_mgr: JobManager) -> None:
         limit 上限 5000 にクランプ。`include_details=true` で
         request_summary / response_summary / metadata も同梱 (default false)。
         """
+        unavail = _audit_unavailable_response()
+        if unavail is not None:
+            return unavail
         if limit <= 0:
             limit = 200
         clamp_warning = None
@@ -100,6 +117,9 @@ def register_tools(mcp: FastMCP, job_mgr: JobManager) -> None:
         AI エージェントは、blocked response の `blocked_by` 情報と組み合わせ、
         必要なら `cancel_job` / `wait_and_retry` を判断する。
         """
+        unavail = _audit_unavailable_response()
+        if unavail is not None:
+            return unavail
         try:
             locks = audit.list_locks(
                 resource=resource or None,

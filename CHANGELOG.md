@@ -1,5 +1,60 @@
 # 変更履歴
 
+## v0.9.3.1 — Operational integrity レビュー対応 (P0/P1)
+
+v0.9.3 外部レビュー P0/P1 対応。新規 MCP ツール無し、互換維持。
+
+### P0 確認
+
+- raw 改行: 該当 8 ファイル全て **LF only / CR=0 / 多行** で正常確認
+  (`tests/test_v0931_review.py` の parametrized テストでリグレッション防止)。
+
+### P1 改修
+
+- **AuditStore init 失敗時の visibility (P1-6)**:
+  - `JobManager._audit_init_error` フラグを追加 (init 失敗時 True)
+  - `logger.warning` で stderr に明示警告
+  - `query_audit` / `list_locks` が `error_class=internal` +
+    `details.sub_class=audit_unavailable` を返す (no-op を隠さない)
+- **`docs/operational_integrity.md` に以下を追記** (P1-2/3/4/5/7/8/9):
+  - **Lock source of truth**: ResourceScheduler (in-memory) と SQLite
+    `locks` テーブルの並行存在を明示、v1.0 までの統合 open question
+  - **Stale lock の定義と解除条件**: `lease_until < now()` 判定、起動時
+    `release_stale_locks()`、Job status 連動は v1.0 候補
+  - **監査対象 tool の範囲**: v0.9.3 で記録される 4 種類 (server_started /
+    job_started / cancelled / resume_started) + v1.0 候補一覧
+    (export / safety_blocked / lock_blocked / unsafe_* 等)
+  - **AuditStore unavailable response 構造**: `audit_unavailable` sub_class
+  - **`include_details=true` の payload schema 例示**: request_summary /
+    response_summary / metadata + redaction marker (`_truncated` /
+    `_truncated_list` / `[REDACTED]` / `<deep>`)
+  - **`blocked` vs `lock_conflict` v1.0 方針**: `error_class=blocked` +
+    `details.reason=lock_conflict` に統一予定
+  - **Audit retention 方針**: v1.x まで自動削除なし、手動 DELETE + VACUUM
+    手順、v1.x で `retention_days` / `max_rows` を検討
+
+### テスト
+
+`tests/test_v0931_review.py` 22 件:
+
+- repo 8 ファイル × LF + multi-line (16 件)
+- AuditStore init_error flag default False
+- `query_audit` / `list_locks` が audit_unavailable を返す (2 件)
+- docs に必須キーワード (source of truth / ResourceScheduler / Stale lock /
+  audit_unavailable / Audit retention / blocked_by / lock_conflict /
+  v1.0 / 監査対象 tool / start_experiment_job 等) が含まれる (4 件)
+
+**合計 617 件 passing** (v0.9.3: 595 → v0.9.3.1: 617)
+
+### 互換性
+
+- 動作変更は `query_audit` / `list_locks` の **AuditStore 失敗時のみ**
+  (これまで実装上 init は失敗しないため、実質的には新規 visibility 追加)
+- 互換維持。experimental スコープ。
+- Stable API 不変。
+
+---
+
 ## v0.9.3 — Operational integrity (audit + locks)
 
 合言葉:「**実験を実行できるだけでなく、誰が・いつ・何を・どの resource に

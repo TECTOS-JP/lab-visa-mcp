@@ -144,6 +144,7 @@ class JobManager:
         # 起動時に running/waiting/cancelling/queued を interrupted に遷移
         self._store.mark_interrupted_on_startup()
         # v0.9.3: AuditStore + stale lock 解放
+        self._audit_init_error = False
         try:
             from visa_mcp.audit import AuditStore
             self._audit = AuditStore(self._store)
@@ -155,8 +156,14 @@ class JobManager:
                            "schema_version": 3},
             )
         except Exception:
-            logger.exception("audit init 失敗 (機能継続)")
+            # v0.9.3.1: no-op 化を visible に (stderr warning + 後段 query で
+            # status=audit_unavailable を返せるよう _audit_init_error を保持)
+            logger.warning(
+                "AuditStore 初期化失敗: audit / locks 機能が無効化されます。"
+                "audit table の永続化は行われません。"
+            )
             self._audit = None
+            self._audit_init_error = True
 
     @property
     def system_config(self) -> SystemConfig:
