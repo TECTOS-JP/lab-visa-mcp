@@ -59,6 +59,15 @@ v1.x 内で **名称・引数・response 構造を固定**。破壊的変更は 
 - **SQLite テーブル**: jobs / job_steps / target_runs / job_events /
   measurement_cache / monitor_data / experiment_plans / experiment_templates
   の列構造 (PRAGMA user_version で migration)
+- **`job_steps.status` enum** (v0.8.2.1 明記): `started / ok / failed /
+  skipped / cancelled / timeout / blocked`
+  (現状の MVP 実装は `started / ok / failed` のみだが、Group/Map/barrier 拡張で
+   skipped / cancelled / timeout / blocked が増える前提で凍結語彙として確保)
+- **`target_runs.status` enum**: `started / ok / failed / skipped /
+  cancelled / timeout / blocked`
+- **`job_outcome` enum** (v0.8.2.1 新規、Observation API のみ):
+  `success / partial_failure / failure / cancelled / interrupted / null(まだ終端でない)`
+  Job state machine とは独立した観測値で、`job_status` から導出される。
 
 ---
 
@@ -91,6 +100,21 @@ v1.x 内で **名称・引数・response 構造を固定**。破壊的変更は 
 ## v0.8.2 時点の deprecated 候補
 
 現在 deprecated 候補は無し。v0.9.x で発生したら本ドキュメントに追記する。
+
+## v0.8.2.1 メモ
+
+外部レビューに応答した変更 (互換維持):
+
+- `get_experiment_timeline.pagination.next_since` → `next_cursor`
+  (`{timestamp, event_id}` 複合 cursor) に変更。`next_since` は **v0.8.2 のみ**
+  存在し、v0.8.2.1 で **削除**された (preview API として警告済み)。
+- `since` / `until` は ISO8601 datetime としてパースされる。不正値は
+  `error_class="validation"` + `details.sub_class="invalid_since_timestamp"`
+  (または `invalid_until_timestamp`)。
+- `get_job_live_view` / `get_job_summary` が `job_outcome` を追加で返す
+  (既存フィールドは不変、純粋追加)。
+- `recommended_next_actions[*].action`: `inspect_state` → `inspect_job_result`
+  に rename (Observation 出力のみで、experimental スコープ内なので即時変更)。
 
 ## 関連ドキュメント
 

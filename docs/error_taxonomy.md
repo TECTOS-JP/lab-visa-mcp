@@ -24,6 +24,13 @@ AI エージェントが「次の判断」を決めるために、`error_class` 
 | `expanded_too_large` | sweep 展開後 step 数が上限超過 | True |
 | `not_query_type` | polling/state_query で query 型でない command | True |
 | `command_not_found` | (実行時) 機器定義の command が未登録 | True |
+| `invalid_since_timestamp` | `get_experiment_timeline(since=...)` の値が ISO8601 でない | True (sub_class) |
+| `invalid_until_timestamp` | `get_experiment_timeline(until=...)` の値が ISO8601 でない | True (sub_class) |
+
+> Note (v0.8.2.1): `invalid_since_timestamp` / `invalid_until_timestamp` は
+> `error_class="validation"` の `details.sub_class` として返される。
+> v1.0 で `error_class` Literal に昇格するか、`sub_class` のまま固定するかは
+> v0.9.x で検討する。
 
 ### 2. execution (実機実行時のエラー)
 

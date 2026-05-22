@@ -1,5 +1,62 @@
 # 変更履歴
 
+## v0.8.2.1 — Observation API レビュー対応 (P1 中心)
+
+v0.8.2 外部レビュー指摘事項のうち P1 6 件 + P2 3 件を対応。新規 MCP ツール追加なし
+(41 ツール変わらず)。互換維持 (純粋追加 / experimental スコープ内 rename のみ)。
+
+### P1 改修
+
+- **timeline pagination を複合 cursor に変更**: `get_experiment_timeline` の
+  `pagination.next_since` (timestamp 単独) を **`next_cursor:
+  {timestamp, event_id}`** に変更。同一 timestamp の複数 event 取りこぼし対策。
+  v0.8.2 の `next_since` は v0.8.2.1 で削除 (preview API のため告知済み)。
+- **since/until を ISO8601 datetime 比較に**: 文字列比較は timezone / ミリ秒桁
+  違いで誤動作する可能性があったため、`datetime.fromisoformat` 経由で比較。
+  末尾 `Z` (UTC) も `+00:00` に正規化。
+- **不正 since/until は validation error**: `error_class="validation"` +
+  `details.sub_class="invalid_since_timestamp"` / `invalid_until_timestamp` で
+  即時拒否 (実機ノータッチ)。`docs/error_taxonomy.md` に sub_class として登録。
+- **`JobManager.session_manager` public プロパティ追加**: `tools/observation.py`
+  からの `job_mgr._sessions` private 依存を解消。Observation API は将来的に
+  `JobStore` / `SessionManager` の public interface だけに依存する方針。
+- **`latest_measurements` の resource 範囲拡張**: Map / DSL Job で
+  `experiment_plans.compiled_summary.required_resources` / `used_resources` と
+  `target_runs.required_resources` / `bindings` を辿り、関連 resource 全体を
+  最大 32 件まで列挙。単一 Job の `rec.resource_name` のみだった v0.8.2 を改善。
+- **`partial_failure` を `job_outcome` に分離** (重要): Job state machine の
+  `job_status` には `partial_failure` を追加せず、Observation API の **派生値
+  `job_outcome`** として算出。`compute_job_outcome(job_status, target_runs)` が
+  `success / partial_failure / failure / cancelled / interrupted / null` を返し、
+  `get_job_live_view` / `get_job_summary` レスポンスに `job_outcome` フィールド
+  を追加。`current_phase` も `job_outcome="partial_failure"` の場合のみ
+  `"partial_failure"` を返すように整理。
+
+### P2 改修
+
+- **`monitor_stop_condition_met` severity を info に**: 正常終了条件と安全停止
+  条件を区別する payload 情報が無いため、控えめな `info` をデフォルトに変更。
+- **`inspect_state` → `inspect_job_result` rename**: `recommended_next_actions`
+  内の action 名と案内する tool 名 (`get_job_result`) の整合を取った。
+  experimental API のため即時 rename。
+- **`docs/compatibility.md` に enum 補足追加**: `job_steps.status` /
+  `target_runs.status` / `job_outcome` の正式 enum を v1.0 凍結候補として明記。
+
+### テスト
+
+`tests/test_observation_v0821.py` 新規 14 件追加 (cursor / datetime 比較 /
+session_manager / job_outcome / inspect_job_result 等)。既存テストは破壊せず。
+**合計 436 件 passing** (v0.8.2: 394 → v0.8.2.1: 436)。
+
+### 互換性
+
+- 純粋追加 (`job_outcome` フィールド) と experimental スコープ内 rename のみ。
+- `next_since` の削除は preview API としての告知通り。v0.8.2 で外部利用が始まる
+  前に v0.8.2.1 で固定する判断。
+- Stable API は不変。
+
+---
+
 ## v0.8.2 — Observation API + 後方互換ポリシー草案
 
 v0.7.0 以降で蓄積された **job_events / job_steps / target_runs / monitor_data** を、

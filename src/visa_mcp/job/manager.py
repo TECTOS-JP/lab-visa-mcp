@@ -145,6 +145,11 @@ class JobManager:
         return self._store
 
     @property
+    def session_manager(self) -> SessionManager:
+        """Public accessor for the SessionManager (v0.8.2.1, used by Observation API)."""
+        return self._sessions
+
+    @property
     def scheduler(self) -> ResourceScheduler:
         return self._scheduler
 

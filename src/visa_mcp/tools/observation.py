@@ -19,10 +19,27 @@ from fastmcp import FastMCP
 from visa_mcp.job import JobManager
 from visa_mcp.job.state_machine import is_terminal
 from visa_mcp.observation import (
-    PHASE_ENUM, compute_current_phase, normalize_event,
+    PHASE_ENUM, compute_current_phase, compute_job_outcome, normalize_event,
     latest_event_kind, filter_kinds, build_run_summary,
 )
 from visa_mcp.response_envelope import make_envelope, make_error
+
+
+def _parse_iso8601(s: str, field_name: str) -> datetime | None:
+    """ISO8601 を堅牢にパース。失敗時は None。
+
+    v0.8.2.1: 文字列比較ではなく datetime に正規化。
+    末尾 'Z' は '+00:00' に置換 (Python 3.10 fromisoformat 互換)。
+    """
+    if not s:
+        return None
+    text = s.strip()
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        return datetime.fromisoformat(text)
+    except (ValueError, TypeError):
+        return None
 
 logger = logging.getLogger(__name__)
 
@@ -52,8 +69,15 @@ def register_tools(mcp: FastMCP, job_mgr: JobManager) -> None:
         limit: 最大返却数 (default 200、上限 5000)
         include_raw: True なら各 item に元の job_events 行を含める
 
-        返り値: data.timeline (新しい順) + data.pagination (limit / returned / has_more /
-        next_since)
+        v0.8.2.1:
+          - since/until を datetime.fromisoformat で比較 (string compare 廃止)
+          - invalid timestamp は validation error (invalid_since_timestamp /
+            invalid_until_timestamp) で返す
+          - pagination は (timestamp, event_id) 複合 cursor に変更
+            (同一 timestamp の複数 event の取りこぼし対策)
+
+        返り値: data.timeline (新しい順) + data.pagination (limit / returned /
+        has_more / next_cursor: {timestamp, event_id} | None)
         """
         try:
             rec = job_mgr.get(job_id)
@@ -63,6 +87,42 @@ def register_tools(mcp: FastMCP, job_mgr: JobManager) -> None:
                 errors=[make_error("not_found", f"job not found: {job_id}",
                                    recoverable=False)],
             )
+
+        # since/until を datetime にパース (v0.8.2.1)
+        since_dt: datetime | None = None
+        until_dt: datetime | None = None
+        if since:
+            since_dt = _parse_iso8601(since, "since")
+            if since_dt is None:
+                return make_envelope(
+                    "error",
+                    errors=[make_error(
+                        "validation",
+                        f"since must be a valid ISO8601 timestamp, got: {since!r}",
+                        recoverable=True,
+                        details={
+                            "sub_class": "invalid_since_timestamp",
+                            "field": "since",
+                            "value": since,
+                        },
+                    )],
+                )
+        if until:
+            until_dt = _parse_iso8601(until, "until")
+            if until_dt is None:
+                return make_envelope(
+                    "error",
+                    errors=[make_error(
+                        "validation",
+                        f"until must be a valid ISO8601 timestamp, got: {until!r}",
+                        recoverable=True,
+                        details={
+                            "sub_class": "invalid_until_timestamp",
+                            "field": "until",
+                            "value": until,
+                        },
+                    )],
+                )
 
         # limit clamp
         if limit <= 0:
@@ -76,12 +136,24 @@ def register_tools(mcp: FastMCP, job_mgr: JobManager) -> None:
         # 内部 list_events は新しい順
         raw_events = job_mgr.store.list_events(job_id, limit=limit * 4)
 
-        # since/until で絞り込み (タイムスタンプ文字列比較で ISO8601 は OK)
-        filtered_raw = raw_events
-        if since:
-            filtered_raw = [e for e in filtered_raw if e["timestamp"] >= since]
-        if until:
-            filtered_raw = [e for e in filtered_raw if e["timestamp"] < until]
+        # since/until で絞り込み (datetime 比較)
+        def _in_range(e: dict) -> bool:
+            ts_str = e.get("timestamp")
+            if not ts_str:
+                return True
+            try:
+                ts = _parse_iso8601(ts_str, "event_ts")
+            except Exception:
+                return True
+            if ts is None:
+                return True
+            if since_dt is not None and ts < since_dt:
+                return False
+            if until_dt is not None and ts >= until_dt:
+                return False
+            return True
+
+        filtered_raw = [e for e in raw_events if _in_range(e)]
 
         # normalize
         items = [normalize_event(e, include_raw=include_raw) for e in filtered_raw]
@@ -91,11 +163,15 @@ def register_tools(mcp: FastMCP, job_mgr: JobManager) -> None:
         # limit
         truncated = items[:limit]
         has_more = len(items) > limit
-        next_since = None
+        next_cursor: dict | None = None
         if has_more and truncated:
-            # 最も古い項目のタイムスタンプを next_since として返す
-            # (新しい順なので最後が古い)
-            next_since = truncated[-1]["timestamp"]
+            # 新しい順なので最後 = 最も古い。次ページはその event より「古い」もの
+            # 同一 timestamp 取りこぼし対策のため event_id を併せて返す。
+            tail = truncated[-1]
+            next_cursor = {
+                "timestamp": tail.get("timestamp"),
+                "event_id": tail.get("event_id"),
+            }
 
         data = {
             "job_id": job_id,
@@ -104,7 +180,7 @@ def register_tools(mcp: FastMCP, job_mgr: JobManager) -> None:
                 "limit": limit,
                 "returned": len(truncated),
                 "has_more": has_more,
-                "next_since": next_since,
+                "next_cursor": next_cursor,
             },
         }
         if clamp_warning:
@@ -180,8 +256,16 @@ def register_tools(mcp: FastMCP, job_mgr: JobManager) -> None:
         except Exception:
             pass
 
+        # v0.8.2.1: job_outcome を分離計算 (job_status != partial_failure)
+        try:
+            _trs = job_mgr.store.list_target_runs(job_id)
+        except Exception:
+            _trs = []
+        job_outcome = compute_job_outcome(rec.status.value, _trs)
+
         phase = compute_current_phase(
             rec.status.value, last_evt, rec.last_step_summary, progress_type,
+            job_outcome=job_outcome,
         )
 
         # current_activity
@@ -226,11 +310,13 @@ def register_tools(mcp: FastMCP, job_mgr: JobManager) -> None:
                 "current_step_index": rec.current_step_index,
             }
 
-        # latest_measurements (measurement_cache から、resource_name 単位で取得)
+        # latest_measurements (measurement_cache から)
+        # v0.8.2.1: Map/DSL Job の場合 experiment_plans から required/used_resources を
+        # 取得して resource を拡張 (P1-5)。private _sessions ではなく public
+        # session_manager 経由 (P1-4)。
         latest: list[dict] = []
         try:
             now_dt = datetime.now(timezone.utc)
-            # rec.resource_name または progress.last_value から測定対象を推定
             instruments_to_check: list[str] = []
             if rec.resource_name:
                 instruments_to_check.append(rec.resource_name)
@@ -238,8 +324,33 @@ def register_tools(mcp: FastMCP, job_mgr: JobManager) -> None:
                 if progress["instrument"] not in instruments_to_check:
                     instruments_to_check.append(progress["instrument"])
 
-            for instr in instruments_to_check:
-                session = job_mgr._sessions.get_session(instr)  # type: ignore[attr-defined]
+            # experiment_plans から resource を拡張 (DSL Job 用)
+            try:
+                exp_plan = job_mgr.store.get_experiment_plan_for_job(job_id)
+            except Exception:
+                exp_plan = None
+            if exp_plan:
+                cs = exp_plan.get("compiled_summary") or {}
+                for r in (cs.get("used_resources") or []) + (
+                    cs.get("required_resources") or []
+                ):
+                    if r and r not in instruments_to_check:
+                        instruments_to_check.append(r)
+
+            # target_runs から resource を補完 (Group/Map Job 用)
+            for t in _trs:
+                for rr in (t.get("required_resources") or []):
+                    if rr and rr not in instruments_to_check:
+                        instruments_to_check.append(rr)
+                for bv in (t.get("bindings") or {}).values():
+                    if bv and bv not in instruments_to_check:
+                        instruments_to_check.append(bv)
+
+            session_mgr = job_mgr.session_manager
+            # 最大 N (32) 件で打ち切り (live_view は overview なので)
+            MAX_INSTRUMENTS = 32
+            for instr in instruments_to_check[:MAX_INSTRUMENTS]:
+                session = session_mgr.get_session(instr)
                 if session is None or session.definition is None:
                     continue
                 for key in session.definition.state_query.keys():
@@ -273,6 +384,7 @@ def register_tools(mcp: FastMCP, job_mgr: JobManager) -> None:
         return make_envelope("ok", data={
             "job_id": job_id,
             "job_status": rec.status.value,
+            "job_outcome": job_outcome,
             "current_phase": phase,
             "current_activity": current_activity,
             "progress": progress_summary,

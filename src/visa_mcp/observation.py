@@ -78,9 +78,9 @@ _EVENT_SEVERITY_MAP: dict[str, str] = {
     "job_failed": "error",
     "job_timeout": "error",
     "job_cancelled": "error",
-    # warning
-    "monitor_stop_condition_met": "warning",
-    # その他は info
+    # その他は info (v0.8.2.1: monitor_stop_condition_met は payload に severity
+    # が無い限り info 扱いに変更。正常終了条件 vs 安全停止条件は判別不可なため、
+    # 控えめな info をデフォルトとする)
 }
 
 
@@ -119,15 +119,57 @@ PHASE_ENUM: tuple[str, ...] = (
 )
 
 
+def compute_job_outcome(
+    job_status: str,
+    target_runs: list[dict] | None = None,
+) -> str | None:
+    """Job 終端時の "結果" を返す。Job state machine とは独立した観測値。
+
+    v0.8.2.1 でレビュー指摘 P1-6 に応答: `partial_failure` を job_status から分離。
+    State machine は `partial_failure` を扱わないが、Observation API では target_runs
+    を見て `partial_failure` を返す。
+
+    Returns:
+        - "success": 全 target が ok / target なしで Job completed
+        - "partial_failure": completed だが一部 target 失敗
+        - "failure": job_status が failed / timeout
+        - "cancelled": cancelled
+        - "interrupted": interrupted
+        - None: Job がまだ終端でない
+    """
+    if job_status == "completed":
+        if target_runs:
+            failed = sum(
+                1 for t in target_runs if t.get("status") not in ("ok", None)
+            )
+            if failed > 0:
+                return "partial_failure"
+        return "success"
+    if job_status == "failed" or job_status == "timeout":
+        return "failure"
+    if job_status == "cancelled":
+        return "cancelled"
+    if job_status == "interrupted":
+        return "interrupted"
+    return None
+
+
 def compute_current_phase(
     job_status: str,
     last_event_type: str | None,
     last_step_summary: str | None = None,
     progress_type: str | None = None,
+    job_outcome: str | None = None,
 ) -> str:
-    """Job 状態 + 最終 event + 進捗から `current_phase` を決定"""
+    """Job 状態 + 最終 event + 進捗から `current_phase` を決定
+
+    v0.8.2.1: job_outcome="partial_failure" の場合 completed だが phase は
+    "partial_failure" として返す (人間/AI への注意喚起)。
+    """
     # 終端状態
     if job_status == "completed":
+        if job_outcome == "partial_failure":
+            return "partial_failure"
         return "completed"
     if job_status == "failed":
         return "failed"
@@ -192,6 +234,7 @@ def normalize_event(
 
     item: dict[str, Any] = {
         "timestamp": event_row.get("timestamp"),
+        "event_id": event_row.get("event_id"),
         "kind": kind,
         "event_type": event_type,
         "severity": severity,
@@ -397,15 +440,18 @@ def build_run_summary(
                 "target_ids": [f["target_id"] for f in recoverable_failures],
             })
         recommended.append({
-            "action": "inspect_state",
+            "action": "inspect_job_result",
             "tool": "get_job_result",
             "args": {"job_id": job_rec_dict.get("job_id")},
             "reason": "失敗箇所の詳細を確認",
         })
 
+    job_outcome = compute_job_outcome(status, target_runs)
+
     return {
         "job_id": job_rec_dict.get("job_id"),
         "job_status": status,
+        "job_outcome": job_outcome,
         "summary": {
             "total_steps": total_steps,
             "completed_steps": completed_steps,
