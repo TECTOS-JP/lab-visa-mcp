@@ -155,7 +155,10 @@ class BenchmarkRunner:
     async def run(self, task: BenchmarkTask) -> BenchmarkResult:
         result = BenchmarkResult(task_id=task.id, status="passed")
         try:
-            await self._run(task, result)
+            if task.layer == "repair":
+                await self._run_repair(task, result)
+            else:
+                await self._run(task, result)
         except Exception as e:
             result.checks.append(CheckResult(
                 "runner_exception", "failed",
@@ -166,6 +169,137 @@ class BenchmarkRunner:
         if any(c.status == "failed" for c in result.checks):
             result.status = "failed"
         return result
+
+    # ============================================================
+    # v0.9.1: repair runner (2 stage)
+    # ============================================================
+
+    async def _run_repair(
+        self, task: BenchmarkTask, result: BenchmarkResult,
+    ) -> None:
+        """Stage A: broken_plan が期待通り失敗するか
+        Stage B: repaired_plan が validate / dry_run / execute を通るか
+        """
+        if task.broken_plan is None or task.repaired_plan is None:
+            _add(result, "repair_inputs_present", False,
+                 "broken_plan / repaired_plan の両方が必要")
+            return
+        if task.expected_failure is None:
+            _add(result, "expected_failure_defined", False,
+                 "expected_failure セクションが必要")
+            return
+
+        # fixture 解決 (通常 run と共通の最小セット)
+        sys_cfg = SystemConfig()
+        if task.fixtures.system_config:
+            sc_path = self.cfg.benchmarks_root / task.fixtures.system_config
+            if sc_path.exists():
+                raw = yaml.safe_load(sc_path.read_text(encoding="utf-8")) or {}
+                sys_cfg = _load_system_config_from_dict(raw)
+        defns = _load_instrument_definitions(
+            task.fixtures.instruments, self.cfg.benchmarks_root,
+        )
+        sm, _sessions = _build_session_manager(sys_cfg, defns)
+
+        # safety_mode override
+        if task.fixtures.safety_mode:
+            import os
+            os.environ["VISA_MCP_SAFETY_MODE"] = task.fixtures.safety_mode
+
+        # ---- Stage A: broken_plan ----
+        result.tool_call_log.append("validate_experiment_plan")
+        broken = validate_and_compile(task.broken_plan, sm, sys_cfg)
+        result.artifacts["broken_plan"] = task.broken_plan
+        result.artifacts["broken_validation"] = {
+            "valid": broken.valid,
+            "errors": broken.errors,
+            "warnings": broken.warnings,
+        }
+
+        ef = task.expected_failure
+        if ef.phase == "validate":
+            # broken_plan は invalid であるべき
+            _add(result, "broken_plan_fails_at_validate",
+                 not broken.valid,
+                 f"valid={broken.valid}")
+            if ef.error_class:
+                classes = [e.get("error_class") for e in broken.errors]
+                _add(result, "broken_plan_has_expected_error_class",
+                     ef.error_class in classes,
+                     f"expected={ef.error_class} actual={classes}")
+                # required_recommended_actions
+                if ef.required_recommended_actions:
+                    matching_errs = [
+                        e for e in broken.errors
+                        if e.get("error_class") == ef.error_class
+                    ]
+                    found_actions: set[str] = set()
+                    for e in matching_errs:
+                        for a in (e.get("recommended_next_actions") or []):
+                            found_actions.add(a.get("action") or "")
+                    missing = [
+                        a for a in ef.required_recommended_actions
+                        if a not in found_actions
+                    ]
+                    _add(result, "broken_plan_has_recommended_actions",
+                         not missing,
+                         f"missing={missing}" if missing else "ok")
+            if ef.field_path:
+                paths = [e.get("field_path") for e in broken.errors]
+                _add(result, "broken_plan_has_expected_field_path",
+                     ef.field_path in paths,
+                     f"expected={ef.field_path} actual={paths}")
+        elif ef.phase == "dry_run":
+            # validate は通るが warnings がある想定
+            if broken.valid:
+                wclasses = [w.get("warning_class") for w in broken.warnings]
+                if ef.error_class:
+                    _add(result, "broken_plan_has_expected_warning_class",
+                         ef.error_class in wclasses,
+                         f"expected={ef.error_class} actual={wclasses}")
+                else:
+                    _add(result, "broken_plan_has_any_warning",
+                         len(broken.warnings) > 0,
+                         f"warnings={len(broken.warnings)}")
+            else:
+                _add(result, "broken_plan_validates",
+                     False, "validate で既に失敗 (dry_run まで到達しない)")
+
+        # ---- Stage B: repaired_plan ----
+        repaired = validate_and_compile(task.repaired_plan, sm, sys_cfg)
+        result.artifacts["repaired_plan"] = task.repaired_plan
+        result.artifacts["repaired_validation"] = {
+            "valid": repaired.valid,
+            "errors": repaired.errors,
+            "warnings": repaired.warnings,
+        }
+
+        _add(result, "repaired_plan_validates",
+             repaired.valid,
+             f"valid={repaired.valid} errors={len(repaired.errors)}")
+
+        er = task.expected_repair or ExpectedRepair()
+        if er.layer in ("dry_run", "execute"):
+            _add(result, "repaired_plan_dry_run_ok",
+                 repaired.valid and not repaired.errors,
+                 f"valid={repaired.valid} errors={len(repaired.errors)}")
+
+        # must_not チェック (例: use_raw_command / override_safety)
+        if er.must_not:
+            forbidden_found: list[str] = []
+            for tool in er.must_not:
+                # plan dict 全体に該当文字列が含まれないことを軽く check
+                import json as _j
+                blob = _j.dumps(task.repaired_plan, ensure_ascii=False)
+                if tool in blob:
+                    forbidden_found.append(tool)
+            _add(result, "repaired_plan_must_not",
+                 not forbidden_found,
+                 f"forbidden_found={forbidden_found}"
+                 if forbidden_found else "ok")
+
+        # tool call log の体裁を整える
+        result.tool_call_log.append("dry_run_plan")
 
     async def _run(
         self, task: BenchmarkTask, result: BenchmarkResult,

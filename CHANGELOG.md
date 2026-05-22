@@ -1,5 +1,112 @@
 # 変更履歴
 
+## v0.9.1 — Agent self-repair 評価 + 測定結果 export API
+
+合言葉:「**AI に修正させる前に、修正すべき失敗を定義する**」。v0.9.0 で作った
+Benchmark 基盤に **self-repair 評価層** を追加し、`broken_plan が期待通り失敗
+する` ↔ `repaired_plan が通る` を再現可能に確認できる。あわせて測定結果の
+**JSON 確認 API + ファイル出力 API** を 2 ツール構成で追加。
+
+### 新規 MCP ツール (2 個、合計 43 → 45)
+
+| ツール | 役割 |
+|--------|------|
+| `get_experiment_results` | Job 測定結果を **少量確認用** JSON で返却 (experimental) |
+| `export_experiment_results` | Job 測定結果を **CSV / JSONL ファイル**へ出力 (experimental) |
+
+### Self-repair 評価層
+
+BenchmarkTask schema を拡張し `layer: "repair"` を追加:
+
+- **`broken_plan`** + **`expected_failure`** (phase / error_class / field_path /
+  required_recommended_actions) で Stage A: 失敗再現
+- **`repaired_plan`** + **`expected_repair`** (repair_actions / must_not / layer)
+  で Stage B: 修正後の plan が通る
+- benchmark_runner に `_run_repair` を追加 (既存 3 layer と共存)
+
+repair task 5 件 (`benchmarks/repair/`):
+
+| task | 評価対象 |
+|------|---------|
+| `repair_001_unknown_command` | `unknown_command` → 正しい command 名へ修正 |
+| `repair_002_invalid_parameter_range` | `parameter_invalid` → 許容範囲内へ修正 |
+| `repair_003_unit_role_missing` | `unit_role_missing` → bindings override (★重要) |
+| `repair_004_raw_resource_with_unit` | `raw_resource_used_with_unit` warning → $role |
+| `repair_005_safety_violation` | parameter 範囲超え → 適切値、override_safety を使わない (★最重要) |
+
+特に `repair_005` の `must_not: [override_safety, unsafe_send_command,
+retry_with_override]` で「AI が安易に override で逃げる修正」を失敗扱いにする。
+
+### `get_experiment_results` (JSON 少量確認)
+
+```json
+{
+  "data": {
+    "columns": ["timestamp", "target_id", "instrument", "measurement",
+                "value", "unit", "step_index", "step_path"],
+    "rows": [...],
+    "pagination": {"limit": 1000, "offset": 0, "returned": N,
+                   "total": M, "has_more": false},
+    "include_monitor_data": false
+  }
+}
+```
+
+- **monitor_data はデフォルト除外** (大量データを混ぜないため)
+- limit 上限 10000 (`get_monitor_data` と同じクランプ)
+- `include_monitor_data=true` で monitor_data を追記 (monitor_id == job_id 慣習)
+
+### `export_experiment_results` (CSV / JSONL)
+
+```json
+{
+  "data": {
+    "path": "~/.visa-mcp/exports/<job_id>_results.csv",
+    "rows": N, "size_bytes": K, "sha256": "...",
+    "format": "csv", "include_monitor_data": false,
+    "columns": [...]
+  }
+}
+```
+
+**安全策**:
+- 既定 export dir は `~/.visa-mcp/exports/`
+- output_path は **default dir 配下のみ許可**。絶対パス / `..` traversal は
+  `error_class=invalid_export_path` で拒否
+- 既存ファイルは `overwrite=False` 既定で拒否 (デフォルトパスでも同様)
+- 出力後に `sha256` を返却 (v1.0 bundle export の事前準備)
+
+### 新規 `error_class`
+
+| クラス | 説明 |
+|--------|------|
+| `invalid_export_path` | output_path が範囲外 / 既存 / 不正 |
+| `export_failed` | 書き込み I/O 失敗 |
+| `unsupported_export_format` | csv/jsonl 以外指定 (sub_class) |
+
+### テスト
+
+- `tests/test_v091_repair_export.py` 16 件 (repair task schema / 5 fixture pass /
+  unit_role_missing recommended_action / safety_violation must_not /
+  get_experiment_results paginated / monitor_data 除外 / CSV+JSONL 出力 /
+  path traversal 拒否 / overwrite 拒否 / sha256 一致 / unsupported_format /
+  not_found)
+- **合計 510 件 passing** (v0.9.0.1: 494 → v0.9.1: 510)
+
+### 互換性
+
+- `get_experiment_results` / `export_experiment_results` は **experimental**
+- BenchmarkTask の repair セクションは optional (既存 task は無変更で動く)
+- Stable API 不変
+
+### スコープ外 (v0.9.x 以降)
+
+- 本物の LLM self-repair loop (v1.0)
+- `export_experiment_bundle` / `import_experiment_bundle` (v1.0)
+- audit SQLite 統合 (v0.9.3)
+
+---
+
 ## v0.9.0.1 — Benchmark / Resume レビュー対応 (P0/P1)
 
 v0.9.0 外部レビュー指摘を P0/P1 で対応。新規 MCP ツールなし。互換維持

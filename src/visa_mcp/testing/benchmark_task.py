@@ -110,15 +110,39 @@ class Fixtures(BaseModel):
 # ============================================================
 
 
+class ExpectedFailure(BaseModel):
+    """v0.9.1: repair task 用「broken_plan が満たすべき失敗仕様」"""
+    phase: Literal["validate", "dry_run", "execute"] = "validate"
+    error_class: str | None = None
+    field_path: str | None = None
+    step_path: str | None = None
+    required_recommended_actions: list[str] = Field(default_factory=list)
+
+
+class ExpectedRepair(BaseModel):
+    """v0.9.1: repair task 用「repaired_plan が満たすべき仕様」"""
+    repair_actions: list[str] = Field(default_factory=list)
+    must_not: list[str] = Field(default_factory=list)
+    layer: Literal["validate", "dry_run", "execute"] = "dry_run"
+
+
 class BenchmarkTask(BaseModel):
     """benchmarks/tasks/*.yaml ルート"""
     id: str
     title: str = ""
     description: str = ""
-    layer: Literal["validate", "dry_run", "execute"] = "execute"
+    # v0.9.1: "repair" mode を layer enum に追加
+    layer: Literal["validate", "dry_run", "execute", "repair"] = "execute"
     input: InputSpec = Field(default_factory=InputSpec)
     expected: ExpectedSpec = Field(default_factory=ExpectedSpec)
     fixtures: Fixtures = Field(default_factory=Fixtures)
+
+    # ---- repair 専用 (layer="repair" のとき必須) ----
+    # broken_plan: 失敗するはずの DSL plan (input.plan / template と排他)
+    broken_plan: dict[str, Any] | None = None
+    repaired_plan: dict[str, Any] | None = None
+    expected_failure: ExpectedFailure | None = None
+    expected_repair: ExpectedRepair | None = None
 
     @field_validator("id")
     @classmethod

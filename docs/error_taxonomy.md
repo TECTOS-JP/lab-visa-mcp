@@ -47,6 +47,9 @@ AI エージェントが「次の判断」を決めるために、`error_class` 
 | `cancelled` | cancel_job により停止 | True |
 | `interrupted` | サーバ再起動で中断 | True |
 | `resume_not_allowed` | `resume_job` の前提条件を満たさない (completed/running/safe_shutdown_failed/dsl_version 非互換 等) (v0.9.0) | False |
+| `invalid_export_path` | `export_experiment_results` の output_path が範囲外 / 既存 / 不正 (v0.9.1) | True |
+| `export_failed` | export 出力中に I/O 失敗 (v0.9.1) | False |
+| `unsupported_export_format` | csv / jsonl 以外の format 指定 (v0.9.1, sub_class) | True |
 | `WaitConditionTimeout` | wait_for_condition timeout | True |
 | `WaitStableTimeout` | wait_for_stable timeout | True |
 | `PollingErrorExceeded` | polling の連続エラーが max_consecutive_errors 超過 | True |
