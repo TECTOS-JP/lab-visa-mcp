@@ -50,8 +50,8 @@ AI エージェントが「次の判断」を決めるために、`error_class` 
 | `invalid_export_path` | `export_experiment_results` の output_path が範囲外 / 既存 / 不正 (v0.9.1) | True |
 | `export_failed` | export 出力中に I/O 失敗 (v0.9.1) | False |
 | `unsupported_export_format` | csv / jsonl 以外の format 指定 (v0.9.1.1: 独立 error_class へ昇格) | True |
-| `lock_conflict` | resource lock が他 owner に保持 (v0.9.3、`blocked` の詳細種別) | True |
-| `lock_stale` | 自 lock の lease 切れ (v0.9.3) | True |
+| `lock_conflict` | **v1.0 で deprecated** — `error_class=blocked` + `details.reason="lock_conflict"` に統一。`lock_conflict` を独立 error_class として返す経路は無し (audit log の内部 marker としてのみ残る)。 | True |
+| `lock_stale` | **v1.0 で deprecated** — `error_class=blocked` + `details.reason="lock_stale"` に統一。 | True |
 | `audit_query_failed` | query_audit 内部 error (v0.9.3、通常は `internal` を使用) | False |
 | `WaitConditionTimeout` | wait_for_condition timeout | True |
 | `WaitStableTimeout` | wait_for_stable timeout | True |

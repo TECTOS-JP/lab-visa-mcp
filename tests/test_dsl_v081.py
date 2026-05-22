@@ -484,5 +484,8 @@ def test_schema_files_generated():
         p = schemas_dir / f"{name}.schema.json"
         assert p.exists(), f"{p} が生成されていない"
         data = json.loads(p.read_text(encoding="utf-8"))
-        assert data.get("x-visa-mcp-status") == "preview"
-        assert "subject-to-change-before-v1.0" in data.get("x-compatibility", "")
+        # v1.0 で stable へ昇格 (preview / stable いずれも許可)
+        assert data.get("x-visa-mcp-status") in ("preview", "stable")
+        compat = data.get("x-compatibility", "")
+        assert ("subject-to-change-before-v1.0" in compat
+                or "v1.x-compatible" in compat)

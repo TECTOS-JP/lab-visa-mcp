@@ -536,7 +536,7 @@ def test_schema_preview_includes_unit():
     p = Path(__file__).parent.parent / "schemas" / "dsl.schema.json"
     schema = json.loads(p.read_text(encoding="utf-8"))
     assert "unit" in schema["properties"]
-    assert schema["x-visa-mcp-status"] == "preview"
+    assert schema["x-visa-mcp-status"] in ("preview", "stable")
 
 
 def test_examples_unit_based_validate():

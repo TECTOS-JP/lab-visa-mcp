@@ -1,5 +1,139 @@
 # 変更履歴
 
+## v1.0.0 — AI エージェント実験自動化評価基盤の安定化
+
+合言葉: **「新機能追加ではなく、安定化・互換保証・再現性・公開準備」**
+
+v0.8.x 〜 v0.9.3.1 で積み上げた DSL / Job / Observation / Benchmark /
+Repair / Export / Registry / Audit を **stable / experimental の 2 段階**で
+正式に分類し、v1.x 期間中の互換保証を宣言する。新規 MCP ツールは 1 個
+(`export_experiment_bundle`, experimental) のみ。
+
+> **v1.0 ≠ 実用全機能完成**。AI エージェント実験自動化を **評価するための
+> 安定版**として位置づける。runtime 分離・backend abstraction・plugin・
+> human-in-the-loop は v1.1 以降。
+
+### 新規 MCP ツール (1 個、合計 47 → 48)
+
+| ツール | 役割 |
+|--------|------|
+| `export_experiment_bundle` (experimental) | Job 実験記録を再現性 bundle (zip) として出力 |
+
+bundle 内容: `manifest.json` (bundle_version=1.0 + sha256 checksums) +
+`plan.json` / `compiled_summary.json` / `job_record.json` / `job_summary.json`
+/ `timeline.jsonl` / `results.jsonl` / `results.csv` (+ `monitor_data.jsonl` /
+`audit.jsonl` をオプション)。
+
+⚠ v1.x では **bundle import / replay は提供しない** (`import_experiment_bundle`
+は v1.1+ 候補)。bundle は **再検証・共有・監査・記事化** のためのパッケージ
+として位置づける。
+
+### Stable / Experimental 分類 (正式)
+
+**Stable** (v1.x 互換保証、35 ツール):
+
+- Core: `list_resources` / `identify_*` / `bind_definition` /
+  `list_available_definitions` / `list_commands` / `get_instrument_info` /
+  `list_safety_constraints` / `validate_operation` / `reload_definitions` /
+  `describe_instrument` / `get_state` / `get_last_measurement`
+- Recipe/Job: `execute_named_command` / `list_recipes` / `execute_recipe` /
+  `start_recipe_job` / `start_wait_job` / `get_job_status` / `get_job_result` /
+  `list_jobs` / `cancel_job`
+- Group/Map: `list_groups` / `list_experiment_units` /
+  `start_group_query_job` / `start_map_recipe_job`
+- DSL: `validate_experiment_plan` / `dry_run_plan` / `start_experiment_job` /
+  `save_experiment_template` / `list_experiment_templates` /
+  `get_experiment_template`
+- Observation: `get_experiment_timeline` / `get_job_live_view` / `get_job_summary`
+- Monitor: `start_monitor` / `stop_monitor` / `get_monitor_data` /
+  `prune_monitor_data`
+- Results: `get_experiment_results` / `export_experiment_results`
+- Ingest: `extract_pdf_commands`
+
+**Experimental** (v1.x 内で変更可能、5 ツール):
+
+- `start_experiment_job_from_template`
+- `resume_job`
+- `query_audit`
+- `list_locks`
+- `export_experiment_bundle` (v1.0 新規)
+
+### Schema status: preview → **stable**
+
+- `schemas/{instrument,system_config,dsl,benchmark_task}.schema.json` の
+  `x-visa-mcp-status` を **`"stable"`**、`x-compatibility` を
+  **`"v1.x-compatible"`**、`$id` を `*.schema.v1.json` URL に更新
+- ただし schema 内の experimental fields (`template_source` / `resume metadata`
+  / `audit/lock 関連`) は `docs/v1_stability_policy.md` で別途明示
+
+### error_taxonomy v1.0 整理
+
+- **`lock_conflict` / `lock_stale` を deprecated** (独立 error_class としての
+  使用を廃止)
+- v1.x 公開 API では `error_class="blocked"` + `details.reason="lock_conflict"
+  | "lock_stale"` + `blocked_by` 詳細に統一
+  - audit log の内部 marker としては `lock_conflict` 文字列を引き続き使用可
+
+### 新規 / 更新 docs
+
+- **`docs/v1_stability_policy.md`** (新規): Versioning policy / Stable
+  tools 一覧 / Experimental tools 一覧 / Stable schemas / Response envelope
+  guarantee / Error taxonomy guarantee / Deprecation policy / What is NOT
+  guaranteed / v1.x → v2.0 展望
+- `docs/compatibility.md`: v0.8.2 草案表記から **v1.0 正式版** へ更新、
+  `v1_stability_policy.md` への参照を追記
+- `docs/error_taxonomy.md`: `lock_conflict` / `lock_stale` の deprecation
+  方針を追記
+- `README.md`: 入口に `v1.0 stability` バナー + `v1_stability_policy.md`
+  への link + `export_experiment_bundle` 追記
+
+### `__version__` 追加
+
+`visa_mcp.__version__ = "1.0.0"` を `src/visa_mcp/__init__.py` に追加。
+`pyproject.toml` の `Development Status` を `4 - Beta` → `5 - Production/Stable`
+に昇格。
+
+### テスト
+
+- `tests/test_v1_stability.py` 15 件:
+  - `__version__` / `pyproject` の v1 確認
+  - `docs/v1_stability_policy.md` の必須キーワード存在
+  - `compatibility.md` が新ポリシーを参照
+  - 全 schema が `x-visa-mcp-status: stable` + `v1.x-compatible`
+  - `lock_conflict` の deprecation 文言が `error_taxonomy.md` に存在
+  - `export_experiment_bundle`: zip 中身に `manifest.json` / `plan.json` /
+    `job_record.json` / `timeline.jsonl` / `results.jsonl` / `results.csv`
+    が含まれる
+  - bundle 内 manifest の sha256 が zip 中身と一致
+  - 外側 zip 全体の sha256 が response の `sha256` と一致
+  - path traversal 拒否
+  - `overwrite=False` 既定で既存ファイル拒否
+  - README が v1_stability_policy + export_experiment_bundle にリンク
+- 旧 schema preview テストを `preview / stable` どちらも許容に更新
+  (互換維持)
+- **合計 632 件 passing** (v0.9.3.1: 617 → v1.0.0: 632)
+
+### 互換性
+
+- **新規追加** (`export_experiment_bundle` + Schema status 昇格) のみ
+- 動作変更は無し (lock_conflict は v0.9.x で error_class として返した
+  経路を持たないため、deprecation の実害なし)
+- 既存 Stable API は v1.x 内で破壊的変更を行わないことを宣言
+
+### スコープ外 (v1.1 以降)
+
+- `import_experiment_bundle` / replay
+- runtime 分離 (`lab-executor-mcp` 仮称) / backend abstraction
+- plugin / extension mechanism
+- human intent / approval 層
+- remote registry / registry pull CLI 本格化
+- 本物の LLM API CI
+- ResourceScheduler と SQLite `locks` の source-of-truth 統合
+- audit retention 自動削除
+- 完全な分散 lock
+
+---
+
 ## v0.9.3.1 — Operational integrity レビュー対応 (P0/P1)
 
 v0.9.3 外部レビュー P0/P1 対応。新規 MCP ツール無し、互換維持。

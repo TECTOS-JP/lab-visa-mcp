@@ -70,7 +70,10 @@ Claude に話しかける：
 >
 > 「USB0::0x... を identify_instrument で識別して、5V 出力するように設定してください」
 
-## 提供される MCP ツール（47 個 / raw 系は別途オプトイン）
+> **v1.0 stability**: Core 35 tools の API は v1.x 内で互換保証。
+> 詳細は [`docs/v1_stability_policy.md`](docs/v1_stability_policy.md)。
+
+## 提供される MCP ツール（48 個 / raw 系は別途オプトイン）
 
 ### 識別・情報
 
@@ -152,6 +155,7 @@ Claude に話しかける：
 | `export_experiment_results` | Job 測定結果を CSV / JSONL ファイル出力 (path traversal 拒否、sha256 添付、experimental) ★v0.9.1 |
 | `query_audit` | 監査ログを filter + cursor pagination で取得 (experimental) ★v0.9.3 |
 | `list_locks` | 現在の resource lock 一覧 (include_stale、experimental) ★v0.9.3 |
+| `export_experiment_bundle` | Job 実験記録を zip (manifest+plan+timeline+results+sha256) で出力 (experimental) ★v1.0 |
 
 ### 取り込み
 

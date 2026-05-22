@@ -957,10 +957,10 @@
   "required": [
     "metadata"
   ],
-  "title": "Instrument YAML Definition (v0.8 preview)",
+  "title": "Instrument YAML Definition (v1.0 stable)",
   "type": "object",
-  "$id": "https://tectos-jp.github.io/visa-mcp/schemas/instrument.schema.preview.json",
-  "x-visa-mcp-status": "preview",
-  "x-compatibility": "subject-to-change-before-v1.0",
-  "description": " (PREVIEW: v1.0 で正式公開予定。外部利用は VS Code 補完等の参考用途のみ。)"
+  "$id": "https://tectos-jp.github.io/visa-mcp/schemas/instrument.schema.v1.json",
+  "x-visa-mcp-status": "stable",
+  "x-compatibility": "v1.x-compatible",
+  "description": " (v1.0 stable. 詳細互換保証は docs/v1_stability_policy.md 参照。 一部 experimental fields は v1.x 内で変更可能。)"
 }

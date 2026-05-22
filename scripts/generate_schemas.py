@@ -24,15 +24,22 @@ def _ensure_path() -> None:
 
 
 def _add_preview_metadata(schema: dict, schema_id: str, title: str) -> dict:
+    """v1.0: preview → stable へ昇格。
+
+    schema core (top-level + 標準 step / 標準 metadata field) は v1.x 互換
+    保証対象。experimental fields (template_source / resume metadata /
+    audit/lock 関連) は docs/v1_stability_policy.md で別途明示。
+    """
     schema["$id"] = (
-        f"https://tectos-jp.github.io/visa-mcp/schemas/{schema_id}.schema.preview.json"
+        f"https://tectos-jp.github.io/visa-mcp/schemas/{schema_id}.schema.v1.json"
     )
     schema["title"] = title
-    schema["x-visa-mcp-status"] = "preview"
-    schema["x-compatibility"] = "subject-to-change-before-v1.0"
+    schema["x-visa-mcp-status"] = "stable"
+    schema["x-compatibility"] = "v1.x-compatible"
     schema["description"] = (
         schema.get("description", "")
-        + " (PREVIEW: v1.0 で正式公開予定。外部利用は VS Code 補完等の参考用途のみ。)"
+        + " (v1.0 stable. 詳細互換保証は docs/v1_stability_policy.md 参照。"
+        " 一部 experimental fields は v1.x 内で変更可能。)"
     )
     return schema
 
@@ -44,7 +51,7 @@ def main() -> int:
     from visa_mcp.dsl.schema import ExperimentPlan
     dsl_schema = ExperimentPlan.model_json_schema()
     _add_preview_metadata(
-        dsl_schema, "dsl", "Experiment DSL ExperimentPlan (v0.8 preview)",
+        dsl_schema, "dsl", "Experiment DSL ExperimentPlan (v1.0 stable)",
     )
     (SCHEMAS_DIR / "dsl.schema.json").write_text(
         json.dumps(dsl_schema, ensure_ascii=False, indent=2) + "\n",
@@ -55,7 +62,7 @@ def main() -> int:
     from visa_mcp.models.instrument_def import InstrumentDefinition
     inst_schema = InstrumentDefinition.model_json_schema()
     _add_preview_metadata(
-        inst_schema, "instrument", "Instrument YAML Definition (v0.8 preview)",
+        inst_schema, "instrument", "Instrument YAML Definition (v1.0 stable)",
     )
     (SCHEMAS_DIR / "instrument.schema.json").write_text(
         json.dumps(inst_schema, ensure_ascii=False, indent=2) + "\n",
@@ -68,7 +75,7 @@ def main() -> int:
     bench_schema = BenchmarkTask.model_json_schema()
     _add_preview_metadata(
         bench_schema, "benchmark_task",
-        "Benchmark Task (incl. repair tasks) (v0.9.2 preview)",
+        "Benchmark Task (incl. repair tasks) (v1.0 stable)",
     )
     (SCHEMAS_DIR / "benchmark_task.schema.json").write_text(
         json.dumps(bench_schema, ensure_ascii=False, indent=2) + "\n",
@@ -80,7 +87,7 @@ def main() -> int:
     sysconf_schema = SystemConfig.model_json_schema()
     _add_preview_metadata(
         sysconf_schema, "system_config",
-        "System Configuration (_system.yaml) (v0.8 preview)",
+        "System Configuration (_system.yaml) (v1.0 stable)",
     )
     (SCHEMAS_DIR / "system_config.schema.json").write_text(
         json.dumps(sysconf_schema, ensure_ascii=False, indent=2) + "\n",
