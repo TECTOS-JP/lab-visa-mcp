@@ -940,14 +940,39 @@ class JobManager:
                     return
 
             # safe_shutdown step が含まれていた → best_effort 実行
+            # v0.8.0.1: compiled.safe_shutdown_targets が明示されている場合は
+            # そのリストの各 resource に対して個別に shutdown を試行する。
+            # None の場合は従来通り required_resources の最初の 1 つのみ shutdown
+            # (= "Plan で使用した全 resource" は v0.8.1 で複数対応予定の暫定動作)。
             shutdown_info = None
             if compiled.has_safe_shutdown:
-                # 最初の resource の session で実行 (典型的に Plan で使用した全 resource)
-                session = (
-                    self._sessions.get_session(required_resources[0])
-                    if required_resources else None
-                )
-                shutdown_info = await self._best_effort_safe_shutdown(session)
+                if compiled.safe_shutdown_targets:
+                    # 明示 targets: 重複排除した resource ごとに個別 shutdown
+                    per_resource: list[dict] = []
+                    overall_success = True
+                    for tgt in compiled.safe_shutdown_targets:
+                        s = self._sessions.get_session(tgt)
+                        info = await self._best_effort_safe_shutdown(s)
+                        per_resource.append({
+                            "resource": tgt,
+                            "shutdown": info,
+                        })
+                        if info.get("attempted") and not info.get("success"):
+                            overall_success = False
+                    shutdown_info = {
+                        "attempted": True,
+                        "source": "explicit_targets",
+                        "success": overall_success,
+                        "targets": list(compiled.safe_shutdown_targets),
+                        "per_resource": per_resource,
+                    }
+                else:
+                    # 従来動作: required_resources の最初の resource
+                    session = (
+                        self._sessions.get_session(required_resources[0])
+                        if required_resources else None
+                    )
+                    shutdown_info = await self._best_effort_safe_shutdown(session)
                 step_results.append({
                     "step": -1, "step_type": "safe_shutdown",
                     "shutdown": shutdown_info,

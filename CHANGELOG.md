@@ -1,5 +1,98 @@
 # 変更履歴
 
+## v0.8.0.1 — 外部レビュー対応 (P0/P1)
+
+v0.8.0 公開後の外部レビューで指摘された P0 三件 + P1 二件への対応。
+DSL の設計内部整合性 (rendered_steps 正式化 / parallel placement /
+safe_shutdown.targets 実行時反映) を中心に整える。
+
+### P0
+
+- **`CompiledPlan.rendered_steps` を正式フィールド化**
+  - 旧 v0.8.0: `tools/dsl.py` の `dry_run_plan` が `_extract_rendered_from_compile`
+    という private helper で `validate_and_compile` を再実行し rendered_steps を
+    取得していた。tool 層が compiler の private (`_Context` / `_convert_step`)
+    に依存する弱い設計
+  - 新: `CompiledPlan` に `rendered_steps: list[dict]` を正式追加。
+    `validate_and_compile()` が `ctx.rendered_steps` をコピーして返す。
+    `dry_run_plan` は `compiled.rendered_steps` を直接利用 (再 compile なし)。
+    `_extract_rendered_from_compile` は削除
+- **`parallel` placement 制約を validation に追加**
+  - 旧: `parallel` は plan のどこにでも置けたが、`ctx.parallel_groups` に
+    分離されるため、parallel 前後の step との実行順序が曖昧になり得た
+  - 新: top-level steps の **末尾に 1 つだけ許可**。それ以外なら
+    `error_class="parallel_placement"` で reject。`recommended_next_actions` で
+    `move_parallel_to_end` または `split_plan` を提示
+  - 「parallel の前段で逐次実行したい step は branches の各 branch 先頭に複製」と
+    エラーメッセージで誘導
+- **`safe_shutdown.targets` を実行時に反映**
+  - 旧: schema には `targets` フィールドがあったが、compile 時に `has_safe_shutdown: bool`
+    のみ立てて、実行時には常に「`required_resources` の最初の resource」を shutdown
+    していた。`targets` 指定が無視されていた
+  - 新: `_Context.safe_shutdown_targets` で resolve_resource 経由の resource list を
+    集計、`CompiledPlan.safe_shutdown_targets: list[str] | None` として保持。
+    `JobManager._run_experiment_plan_job` が指定 targets ごとに個別
+    `_best_effort_safe_shutdown` を呼ぶ。`safe_shutdown` 結果に
+    `source="explicit_targets"`, `targets`, `per_resource` を含める
+  - `targets` 未指定なら従来動作 (required_resources の最初)
+
+### P1
+
+- **server.py instructions に DSL 導線を追記**
+  - 「複数機器・sweep・parallel を含む実験計画は `validate_experiment_plan` →
+    `dry_run_plan` → `start_experiment_job` の順」を明記
+  - 「いきなり `start_experiment_job` を呼ばず (a)(b) を通すことを強く推奨」
+  - 「`save_experiment_template` で再利用可能」も追記
+- **template 取得/list MCP ツール 2 個追加**
+  - `list_experiment_templates`: name / dsl_version / description / timestamps
+    のみを返す (plan JSON 本体は含まない、軽量)
+  - `get_experiment_template(name)`: plan JSON 含む詳細
+  - 既存 `save_experiment_template` と合わせてテンプレート再利用ループが完結
+
+### P2 (確認のみ)
+
+- README の改行 (ローカルは LF 正常、GitHub raw の表示問題は外部キャッシュ起因)
+
+### 見送り (v0.8.1+)
+
+- `ExperimentPlan` rootに `unit` 直接指定
+- raw VISA resource を strict mode で禁止
+- `DSLCommandStep` / `DSLQueryStep` の意味差明確化
+- `delete_experiment_template` MCP ツール
+
+### 新規 MCP ツール (2 個、合計 36 → 38)
+
+| ツール | 用途 |
+|--------|------|
+| `list_experiment_templates` | テンプレート一覧 (軽量) |
+| `get_experiment_template` | 指定 name の詳細 (plan JSON 含む) |
+
+### テスト (9 件追加、合計 351 passed)
+
+`tests/test_dsl_v0801.py`:
+
+- `test_compiled_plan_includes_rendered_steps` (rendered_steps が
+  CompiledPlan の正式フィールドに含まれる)
+- `test_rendered_steps_includes_safety_and_verify`
+- `test_parallel_in_middle_rejected` (中間 parallel は error)
+- `test_multiple_parallel_rejected`
+- `test_parallel_at_end_accepted`
+- `test_safe_shutdown_targets_resolved_to_resources` (DSL targets が
+  CompiledPlan.safe_shutdown_targets に resolve される)
+- `test_safe_shutdown_default_is_all_used_resources` (未指定なら None)
+- `test_safe_shutdown_targets_respected_at_execution` (**必須**:
+  実行時に targets で指定した resource にだけ shutdown が走る)
+- `test_template_get_list_through_store`
+
+### 後方互換
+
+- 既存 36 MCP ツール / v0.8.0 DSL schema / SQLite DB はすべて不変
+- `parallel` placement の reject は曖昧パターンの reject のみ
+  (top-level 末尾の単独 parallel は従来通り通る)
+- `safe_shutdown.targets` 未指定時の挙動は v0.8.0 と同一
+
+---
+
 ## v0.8.0 — Plan / Execute DSL
 
 これまで積み上げた Job / Polling / Group / Map / Barrier / Stagger / Verify /

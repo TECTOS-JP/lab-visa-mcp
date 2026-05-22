@@ -117,12 +117,8 @@ def register_tools(
                 "error",
                 errors=[make_error("internal", str(e), recoverable=False)],
             )
-        # rendered_steps は compiler._Context に蓄積されているが、CompiledPlan には
-        # 直接含めていない。compile を再実行して rendered を取得する代わりに、
-        # ここでは compile_to_rendered() を追加する代わりに validate_and_compile に
-        # rendered_steps を含めるよう拡張する設計が良い。
-        # MVP では再 compile せず、compile 内部の summary + warnings を返す。
-        rendered_steps = _extract_rendered_from_compile(plan, session_mgr, job_mgr)
+        # v0.8.0.1: CompiledPlan.rendered_steps を直接利用 (再 compile 不要)
+        rendered_steps = compiled.rendered_steps
 
         envelope_status = "ok" if compiled.valid else "error"
         envelope_errors = (
@@ -238,6 +234,51 @@ def register_tools(
         )
 
     @mcp.tool()
+    async def list_experiment_templates() -> dict:
+        """保存済み実験テンプレート一覧を取得 (v0.8.0.1)
+
+        plan_json 本体は返さず、name / dsl_version / description / timestamps のみ。
+        詳細は get_experiment_template(name) で取得する。
+        """
+        try:
+            items = job_mgr.store.list_experiment_templates()
+        except Exception as e:
+            return make_envelope(
+                "error",
+                errors=[make_error("internal", str(e))],
+            )
+        return make_envelope("ok", data={
+            "count": len(items),
+            "templates": items,
+        })
+
+    @mcp.tool()
+    async def get_experiment_template(name: str) -> dict:
+        """指定 name のテンプレートを取得 (plan JSON 本体含む) (v0.8.0.1)"""
+        if not name or not name.strip():
+            return make_envelope(
+                "error",
+                errors=[make_error("validation", "name が必須", recoverable=False)],
+            )
+        try:
+            tpl = job_mgr.store.get_experiment_template(name.strip())
+        except Exception as e:
+            return make_envelope(
+                "error",
+                errors=[make_error("internal", str(e))],
+            )
+        if tpl is None:
+            return make_envelope(
+                "error",
+                errors=[make_error(
+                    "not_found",
+                    f"template '{name}' は存在しません",
+                    recoverable=False,
+                )],
+            )
+        return make_envelope("ok", data=tpl)
+
+    @mcp.tool()
     async def save_experiment_template(
         name: str,
         plan: dict,
@@ -304,26 +345,6 @@ def register_tools(
         })
 
 
-def _extract_rendered_from_compile(plan_dict, session_mgr, job_mgr):
-    """dry_run 用に rendered_steps を取得する。
-
-    現状の compiler は CompiledPlan に rendered_steps を含めていないため、
-    内部 _Context を直接使う薄いヘルパ。本実装では再 compile して
-    rendered_steps を抽出する。
-    """
-    from visa_mcp.dsl.compiler import _Context, _convert_step
-    from visa_mcp.dsl.schema import ExperimentPlan
-
-    try:
-        plan = ExperimentPlan(**plan_dict)
-    except Exception:
-        return []
-    ctx = _Context(plan, session_mgr, job_mgr.system_config)
-    for i, s in enumerate(plan.steps):
-        ctx.path = f"steps[{i}]"
-        try:
-            _convert_step(ctx, s, i, dict(plan.variables))
-        except Exception:
-            pass
-        ctx.total_expanded_steps += 1
-    return ctx.rendered_steps
+# v0.8.0.1: _extract_rendered_from_compile は CompiledPlan.rendered_steps の
+# 正式フィールド化により不要となったため削除。tools 層が compiler の private
+# helper (_Context / _convert_step) に依存しなくなった。

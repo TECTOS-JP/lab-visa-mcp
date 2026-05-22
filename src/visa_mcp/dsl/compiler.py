@@ -52,15 +52,20 @@ class CompiledPlan:
     # 展開後 step 数 / 推定 duration / required_resources / verify 使用有無 等
     summary: dict[str, Any] = field(default_factory=dict)
     # compile 結果: 「single thread plan」 + 「parallel branch plans」のリスト
-    # parallel が無ければ branch_plans 空、main_plan のみで実行される。
-    # parallel が含まれる場合、現在 step より後ろを別 Plan として展開して
-    # GroupExecutor に転送する設計 (v0.8.0 MVP: parallel は plan の終端付近で 1 度のみ想定)。
+    # v0.8.0.1: parallel は top-level 末尾 1 回のみ許可 (placement 制約強化)
     main_plan: Plan | None = None
     parallel_groups: list[dict] = field(default_factory=list)
     # safe_shutdown ステップが含まれていたか
     has_safe_shutdown: bool = False
+    # v0.8.0.1: safe_shutdown.targets が明示指定された場合の対象 resource リスト
+    # None なら "Plan で使用した全 resource" (= main_plan.required_resources)
+    safe_shutdown_targets: list[str] | None = None
     # 解決済み bindings (alias → resource_name)
     resolved_instruments: dict[str, str] = field(default_factory=dict)
+    # v0.8.0.1: dry_run 用 rendered SCPI / safety / verify 情報
+    # 旧 v0.8.0 では _Context に蓄積されていたが、外部 (tools/dsl.py) から
+    # private helper で再 compile していたため正式フィールド化
+    rendered_steps: list[dict] = field(default_factory=list)
 
 
 # ============================================================
@@ -94,6 +99,9 @@ class _Context:
         self.uses_polling: bool = False
         # safe_shutdown 含む
         self.has_safe_shutdown: bool = False
+        # v0.8.0.1: safe_shutdown.targets が明示指定された場合の解決済み resource list。
+        # None ならコンパイル後の required_resources を使う。
+        self.safe_shutdown_targets: list[str] | None = None
         # parallel が含まれていたか
         self.parallel_groups: list[dict] = []
         # validation-only mode?
@@ -470,13 +478,35 @@ def _convert_step(
 
     if isinstance(s, DSLSafeShutdownStep):
         ctx.has_safe_shutdown = True
+        # v0.8.0.1: targets 指定があれば実 resource に解決して保持
+        resolved_targets: list[str] | None = None
+        if s.targets:
+            resolved_targets = []
+            for t in s.targets:
+                r, _ = _resolve_instrument(ctx, t, step_index)
+                if r is not None:
+                    resolved_targets.append(r)
+            # 既存解決と統合 (canonical sorted)
+            resolved_targets = sorted(set(resolved_targets))
+        if resolved_targets:
+            # 複数 safe_shutdown step は union として扱う
+            if ctx.safe_shutdown_targets is None:
+                ctx.safe_shutdown_targets = resolved_targets
+            else:
+                ctx.safe_shutdown_targets = sorted(
+                    set(ctx.safe_shutdown_targets) | set(resolved_targets)
+                )
         # IR 上には残さない (Job 終端で JobManager が _best_effort_safe_shutdown を実行)
         # 但し dry_run の rendered 表示用に rendered_steps へ追加
         ctx.rendered_steps.append({
             "step_index": step_index,
             "path": ctx.path,
             "step_type": "safe_shutdown",
-            "targets": list(s.targets) if s.targets else "all_used_resources",
+            "targets": (
+                resolved_targets if resolved_targets is not None
+                else "all_used_resources"
+            ),
+            "targets_raw": list(s.targets) if s.targets else None,
         })
         return []
 
@@ -570,6 +600,41 @@ def validate_and_compile(
         )
 
     ctx = _Context(plan, session_mgr, system_config)
+
+    # v0.8.0.1: parallel placement 制約 ── top-level steps の末尾 1 回のみ許可。
+    # 中間に parallel を置くと前後の step との実行順序が曖昧になるため、
+    # MVP では「最後の step に 1 つだけ」を validation で強制する。
+    # body 内 (sweep の中など) の parallel も MVP では不可。
+    parallel_indices = [
+        i for i, s in enumerate(plan.steps) if isinstance(s, DSLParallelStep)
+    ]
+    if parallel_indices:
+        last_idx = len(plan.steps) - 1
+        if len(parallel_indices) > 1:
+            ctx.add_error(
+                "parallel_placement",
+                f"parallel step は 1 plan に 1 つだけ許可されます "
+                f"(検出: index {parallel_indices})",
+                step_index=parallel_indices[1],
+                recommended_next_actions=[
+                    {"action": "split_plan",
+                     "reason": "複数 parallel を使う場合は plan を分割してください"},
+                ],
+            )
+        elif parallel_indices[0] != last_idx:
+            ctx.add_error(
+                "parallel_placement",
+                f"parallel step は top-level steps の末尾 (index {last_idx}) に "
+                f"配置してください (現在 index {parallel_indices[0]})。"
+                f"末尾以降に他の step を置けません",
+                step_index=parallel_indices[0],
+                recommended_next_actions=[
+                    {"action": "move_parallel_to_end",
+                     "reason": "parallel の前段に置きたい step は parallel.branches の "
+                               "各 branch 先頭に複製してください"},
+                ],
+            )
+
     ir_steps: list[IRStep] = []
     for i, s in enumerate(plan.steps):
         ctx.path = f"steps[{i}]"
@@ -582,6 +647,8 @@ def validate_and_compile(
             errors=ctx.errors,
             warnings=ctx.warnings,
             summary=_make_summary(ctx, plan),
+            rendered_steps=list(ctx.rendered_steps),
+            resolved_instruments=dict(ctx.resolved),
         )
 
     main_plan = Plan(
@@ -602,7 +669,9 @@ def validate_and_compile(
         main_plan=main_plan,
         parallel_groups=ctx.parallel_groups,
         has_safe_shutdown=ctx.has_safe_shutdown,
+        safe_shutdown_targets=ctx.safe_shutdown_targets,
         resolved_instruments=dict(ctx.resolved),
+        rendered_steps=list(ctx.rendered_steps),
     )
 
 
