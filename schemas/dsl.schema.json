@@ -634,6 +634,18 @@
       "title": "Description",
       "type": "string"
     },
+    "unit": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Unit"
+    },
     "bindings": {
       "additionalProperties": {
         "type": "string"

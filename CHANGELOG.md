@@ -1,5 +1,119 @@
 # 変更履歴
 
+## v0.8.3 — DSL usability refinement (unit + template override)
+
+合言葉:「DSL の能力を増やすのではなく、LLM が少ない指定で正しい Plan を書ける
+ようにする」。新 step type / branch / loop は追加せず、**unit 直接参照** と
+**template override 経由の再利用** を整備。
+
+### 新規 MCP ツール (1 個、合計 41 → 42)
+
+| ツール | 役割 |
+|--------|------|
+| `start_experiment_job_from_template` | 保存済み template に override を適用して実行 (experimental, v0.8.3) |
+
+### `ExperimentPlan.unit` 直接対応
+
+`bindings` を毎回書き下す代わりに、`_system.yaml` の `experiment_units` を
+**unit name 一発で参照**できる。
+
+```json
+{
+  "dsl_version": "0.8",
+  "unit": "unit001",
+  "steps": [
+    { "type": "command", "instrument": "$psu",
+      "command": "set_voltage", "args": {"voltage": 3.0} }
+  ]
+}
+```
+
+- 解決順序: **unit_bindings → explicit bindings override → alias → raw resource**
+- `bindings` で同 role を上書き可能 (例: `dmm` だけ別個体に差し替え)
+- `unit` 未指定の既存 Plan は完全後方互換 (動作変更なし)
+
+### `unit_resolution` を dry-run / validate summary に常時公開
+
+```json
+{
+  "unit_resolution": {
+    "unit": "unit001",
+    "unit_bindings": {"psu": "psu001", "dmm": "dmm001"},
+    "explicit_bindings": {"dmm": "dmm_backup"},
+    "effective_bindings": {"psu": "psu001", "dmm": "dmm_backup"},
+    "overridden_roles": ["dmm"]
+  }
+}
+```
+
+- AI / 人間が「どの role がどの resource に解決されたか」をブラックボックスに
+  しない設計
+- v0.9.0 benchmark や v0.9.1 self-repair でそのまま使える透明性
+
+### 新 validation error / warning
+
+| 種別 | error_class / warning_class | 発生条件 |
+|------|----------------------------|---------|
+| error | `unknown_unit` | `unit` が `experiment_units` に未登録 |
+| error | `unit_role_missing` | `$role` が unit / explicit のいずれにも無い |
+| warning | `raw_resource_used_with_unit` | unit 指定 Plan で raw VISA resource を直接使った |
+
+### Template override (experimental)
+
+`save_experiment_template` で保存した template に **限定された override** を
+適用して実行:
+
+- **許可 override キー**: `name` / `unit` / `bindings` / `parameters` / `owner`
+- **拒否**: `steps` / `dsl_version` / `description` / `variables` 直接上書き
+  (`error_class=validation`, `details.sub_class=template_override_invalid`)
+- `dry_run=True` で Job を始めずに validate + rendered_steps を返す
+- `include_expanded_plan=True` で override 適用後の Plan を data に同梱
+
+### Job metadata に `template_source` を記録
+
+Template 経由で起動した Job は以下の両方に `template_source` が永続化される
+(将来の bundle export / benchmark で重要):
+
+- `jobs.parameters_json.template_source`
+- `experiment_plans.compiled_summary_json.template_source`
+
+```json
+{
+  "template_source": {
+    "template_name": "voltage_sweep_basic",
+    "template_version": "0.8",
+    "override_json": {...},
+    "override_keys": ["unit", "parameters.voltage"]
+  }
+}
+```
+
+### JSON Schema preview + examples
+
+- `schemas/dsl.schema.json` を `ExperimentPlan.unit` 追加で再生成
+  (preview status 維持)
+- `docs/dsl/examples/unit_based_voltage_sweep/`
+- `docs/dsl/examples/template_override/` (template.json / override.json /
+  expected expanded plan / README)
+
+### テスト
+
+`tests/test_dsl_v083.py` 24 件追加 (unit 解決 / explicit override /
+unknown_unit / unit_role_missing / dry-run summary / raw_resource_used_with_unit
+/ template_override allowed&rejected キー / template dry_run /
+template_source 永続化 / schema preview)。**合計 460 件 passing**
+(v0.8.2.1: 436 → v0.8.3: 460)。
+
+### 互換性
+
+- `unit` は optional field、既存 Plan は無変更で通る
+- `unit_resolution` は summary に純粋追加 (`unit=None` の場合も出る)
+- `start_experiment_job_from_template` は **experimental** スコープ
+  (`docs/compatibility.md` 参照)
+- DSL schema は `dsl_version="0.8"` のまま (新フィールド追加のみ)
+
+---
+
 ## v0.8.2.1 — Observation API レビュー対応 (P1 中心)
 
 v0.8.2 外部レビュー指摘事項のうち P1 6 件 + P2 3 件を対応。新規 MCP ツール追加なし

@@ -14,6 +14,7 @@ from fastmcp import FastMCP
 
 from visa_mcp.dsl import CURRENT_DSL_VERSION
 from visa_mcp.dsl.compiler import validate_and_compile
+from visa_mcp.dsl.template import apply_template_override, TemplateOverrideError
 from visa_mcp.job import JobManager
 from visa_mcp.job.state_machine import JobStatus
 from visa_mcp.response_envelope import make_envelope, make_error
@@ -224,6 +225,219 @@ def register_tools(
                     ) for e in verr
                 ]
 
+        return make_envelope(
+            "ok" if rec.status != JobStatus.FAILED else "error",
+            data=data,
+            errors=envelope_errors or (
+                [make_error(
+                    rec.error_class or "validation",
+                    rec.last_step_summary or "failed",
+                    recoverable=False,
+                )] if rec.status == JobStatus.FAILED else None
+            ),
+            job_id=rec.job_id,
+        )
+
+    @mcp.tool()
+    async def start_experiment_job_from_template(
+        name: str,
+        override: dict | None = None,
+        owner: str = "",
+        dry_run: bool = False,
+        include_expanded_plan: bool = False,
+        override_safety: bool = False,
+        override_reason: str = "",
+        job_timeout_s: float = 0.0,
+        queue_policy: str = "queue",
+    ) -> dict:
+        """**(experimental, v0.8.3)** 保存済み template を override 適用して実行する
+
+        Override は **限定キーのみ許可**:
+          name / unit / bindings / parameters / owner
+        steps / dsl_version / variables 直接上書き等は拒否される (構造を変えるなら
+        通常 `start_experiment_job(plan)` を使う)。
+
+        dry_run=True なら Job を開始せず、override 後の Plan を validate +
+        rendered_steps で返す (`dry_run_plan` 相当)。
+
+        include_expanded_plan=True で expanded_plan (override 適用後の Plan JSON)
+        も data に同梱。default False (応答サイズ抑制)。
+
+        Job metadata の parameters / experiment_plans.compiled_summary に
+        `template_source` が記録され、後から Job がどの template + override から
+        生成されたかを追える。
+        """
+        if not name or not name.strip():
+            return make_envelope(
+                "error",
+                errors=[make_error("validation", "name が必須",
+                                   recoverable=False)],
+            )
+        if queue_policy not in ("queue", "reject_if_busy"):
+            return make_envelope(
+                "error",
+                errors=[make_error("validation",
+                    f"queue_policy: {queue_policy}", recoverable=False)],
+            )
+
+        try:
+            tpl = job_mgr.store.get_experiment_template(name.strip())
+        except Exception as e:
+            return make_envelope(
+                "error",
+                errors=[make_error("internal", str(e))],
+            )
+        if tpl is None:
+            return make_envelope(
+                "error",
+                errors=[make_error(
+                    "not_found",
+                    f"template '{name}' は存在しません",
+                    recoverable=False,
+                    recommended_next_actions=[
+                        {"action": "list_experiment_templates",
+                         "tool": "list_experiment_templates"},
+                    ],
+                )],
+            )
+
+        template_plan = tpl.get("plan")
+        if not isinstance(template_plan, dict):
+            return make_envelope(
+                "error",
+                errors=[make_error(
+                    "internal",
+                    f"template '{name}' の plan が JSON object ではありません",
+                    recoverable=False,
+                )],
+            )
+
+        # override 適用
+        try:
+            expanded_plan, applied_summary = apply_template_override(
+                template_plan, override or {},
+            )
+        except TemplateOverrideError as e:
+            return make_envelope(
+                "error",
+                errors=[make_error(
+                    "validation",
+                    str(e),
+                    recoverable=True,
+                    details={
+                        "sub_class": "template_override_invalid",
+                        "rejected_keys": e.rejected_keys,
+                    },
+                    recommended_next_actions=[
+                        {"action": "use_start_experiment_job",
+                         "reason": "steps/構造を変える場合は通常 Plan を使ってください"},
+                    ],
+                )],
+            )
+
+        template_source = {
+            "template_name": name.strip(),
+            "template_version": tpl.get("dsl_version") or CURRENT_DSL_VERSION,
+            "override_json": override or {},
+            "override_keys": applied_summary.get("override_keys", []),
+        }
+
+        # dry_run: Job 開始せず validate + rendered_steps
+        if dry_run:
+            try:
+                compiled = validate_and_compile(
+                    expanded_plan, session_mgr, job_mgr.system_config,
+                )
+            except Exception as e:
+                return make_envelope(
+                    "error",
+                    errors=[make_error("internal", str(e), recoverable=False)],
+                )
+            envelope_status = "ok" if compiled.valid else "error"
+            envelope_errors = (
+                [
+                    make_error(
+                        e.get("error_class", "validation"),
+                        e.get("message", "?"),
+                        recoverable=True,
+                        recommended_next_actions=e.get("recommended_next_actions"),
+                        details={k: v for k, v in e.items()
+                                 if k not in ("error_class", "message",
+                                              "recommended_next_actions")},
+                    )
+                    for e in compiled.errors
+                ]
+                if not compiled.valid else None
+            )
+            data: dict = {
+                "dry_run": True,
+                "valid": compiled.valid,
+                "template": {
+                    "name": name.strip(),
+                    "version": tpl.get("dsl_version") or CURRENT_DSL_VERSION,
+                    "override_applied": applied_summary.get("override_applied", False),
+                    "override_keys": applied_summary.get("override_keys", []),
+                },
+                "summary": compiled.summary,
+                "warnings": compiled.warnings,
+                "rendered_steps": compiled.rendered_steps,
+                "note": "Job は開始されていません",
+            }
+            if include_expanded_plan:
+                data["expanded_plan"] = expanded_plan
+            return make_envelope(
+                envelope_status, data=data, errors=envelope_errors,
+            )
+
+        # 実行
+        try:
+            rec = await job_mgr.start_experiment_job(
+                plan_dict=expanded_plan,
+                owner=owner,
+                override_safety=override_safety,
+                override_reason=override_reason,
+                job_timeout_s=(job_timeout_s if job_timeout_s > 0 else None),
+                queue_policy=queue_policy,
+                template_source=template_source,
+            )
+        except Exception as e:
+            logger.exception("start_experiment_job_from_template 失敗")
+            return make_envelope(
+                "error",
+                errors=[make_error("internal", str(e), recoverable=False)],
+            )
+
+        data = {
+            "job_id": rec.job_id,
+            "status": rec.status.value,
+            "name": expanded_plan.get("name", ""),
+            "dsl_version": expanded_plan.get("dsl_version", CURRENT_DSL_VERSION),
+            "created_at": rec.created_at,
+            "template": {
+                "name": name.strip(),
+                "version": tpl.get("dsl_version") or CURRENT_DSL_VERSION,
+                "override_applied": applied_summary.get("override_applied", False),
+                "override_keys": applied_summary.get("override_keys", []),
+            },
+        }
+        if include_expanded_plan:
+            data["expanded_plan"] = expanded_plan
+        if rec.parameters and rec.parameters.get("plan_id"):
+            data["plan_id"] = rec.parameters["plan_id"]
+
+        envelope_errors = None
+        if rec.status == JobStatus.FAILED and rec.result:
+            verr = rec.result.get("validation_errors") or []
+            if verr:
+                envelope_errors = [
+                    make_error(
+                        e.get("error_class", "validation"),
+                        e.get("message", "?"),
+                        recoverable=True,
+                        details={k: v for k, v in e.items()
+                                 if k not in ("error_class", "message")},
+                    ) for e in verr
+                ]
         return make_envelope(
             "ok" if rec.status != JobStatus.FAILED else "error",
             data=data,

@@ -70,7 +70,7 @@ Claude に話しかける：
 >
 > 「USB0::0x... を identify_instrument で識別して、5V 出力するように設定してください」
 
-## 提供される MCP ツール（41 個 / raw 系は別途オプトイン）
+## 提供される MCP ツール（42 個 / raw 系は別途オプトイン）
 
 ### 識別・情報
 
@@ -138,6 +138,7 @@ Claude に話しかける：
 | `save_experiment_template` | 再利用可能 DSL テンプレートを SQLite に保存 |
 | `list_experiment_templates` | 保存済みテンプレート一覧 ★v0.8.0.1 |
 | `get_experiment_template` | 指定 name のテンプレート (plan JSON 含む) ★v0.8.0.1 |
+| `start_experiment_job_from_template` | template に override (name/unit/bindings/parameters/owner) を適用して実行 (dry_run 対応) ★v0.8.3 |
 
 ### **Observation (実験ビュー)** ★v0.8.2 新規
 

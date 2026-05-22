@@ -68,6 +68,8 @@ class CompiledPlan:
     # required_resources (= main_plan.required_resources) は scheduler 投入用 (parallel branches は別 Job 経路を辿るため、main_plan のみの収集)
     # used_resources は dry-run / safe_shutdown のスコープ表示用 (parallel branches も含む完全な使用 resource 集合)
     used_resources: list[str] = field(default_factory=list)
+    # v0.8.3: unit 解決結果 (unit 未指定なら unit=None / unit_bindings={})
+    unit_resolution: dict[str, Any] = field(default_factory=dict)
 
 
 # ============================================================
@@ -94,6 +96,18 @@ class _Context:
         self.required_resources: set[str] = set()
         # 解決済み instrument_ref → resource_name
         self.resolved: dict[str, str] = {}
+        # v0.8.3: unit 解決メタ情報
+        # unit_bindings: 指定 unit から取り出した role → alias
+        # explicit_bindings: plan.bindings 原文
+        # effective_bindings: unit_bindings + explicit_bindings (override 優先)
+        # overridden_roles: explicit が unit を上書きした role 一覧
+        self.unit_bindings: dict[str, str] = {}
+        self.explicit_bindings: dict[str, str] = dict(plan.bindings)
+        self.effective_bindings: dict[str, str] = dict(plan.bindings)
+        self.overridden_roles: list[str] = []
+        self.unit_name: str | None = plan.unit
+        # raw resource を「unit 指定があるのに使った」かどうか
+        self._raw_resource_with_unit_warned: set[str] = set()
         # 推定 duration (s)
         self.estimated_duration_s: float = 0.0
         # verify 使用 step 数 / polling 使用有無
@@ -186,20 +200,37 @@ def _resolve_instrument(
         return None, None
 
     target = ref
+    # v0.8.3: $role 参照は effective_bindings (unit + explicit) で解決
     if ref.startswith("$"):
         role = ref[1:]
-        if role not in ctx.plan.bindings:
-            ctx.add_error(
-                "unknown_binding",
-                f"plan.bindings に '{role}' がありません (ref={ref!r})",
-                step_index=step_index,
-                recommended_next_actions=[
-                    {"action": "fix_bindings",
-                     "reason": f"plan.bindings に '{role}' を追加してください"},
-                ],
-            )
+        if role not in ctx.effective_bindings:
+            # unit 指定があるのに role 未定義の場合は unit_role_missing
+            if ctx.unit_name:
+                ctx.add_error(
+                    "unit_role_missing",
+                    f"role '{role}' が unit '{ctx.unit_name}' / explicit bindings の"
+                    f"いずれにも定義されていません (ref={ref!r})",
+                    step_index=step_index,
+                    field_path="bindings",
+                    recommended_next_actions=[
+                        {"action": "add_binding_override",
+                         "reason": f"plan.bindings に '{role}': '<alias>' を追加"},
+                        {"action": "choose_different_unit",
+                         "reason": f"role '{role}' を含む experiment_unit を選択"},
+                    ],
+                )
+            else:
+                ctx.add_error(
+                    "unknown_binding",
+                    f"plan.bindings に '{role}' がありません (ref={ref!r})",
+                    step_index=step_index,
+                    recommended_next_actions=[
+                        {"action": "fix_bindings",
+                         "reason": f"plan.bindings に '{role}' を追加してください"},
+                    ],
+                )
             return None, None
-        target = ctx.plan.bindings[role]
+        target = ctx.effective_bindings[role]
 
     # alias / resource_name 解決
     try:
@@ -225,6 +256,22 @@ def _resolve_instrument(
             f"alias / bindings の使用を推奨します",
             instrument=target,
         )
+        # v0.8.3: unit 指定ありの Plan で raw resource を直接使った場合は
+        # 別 warning を出す (typo で unit role を bypass している可能性が高い)
+        if ctx.unit_name and target not in ctx._raw_resource_with_unit_warned:
+            ctx._raw_resource_with_unit_warned.add(target)
+            ctx.add_warning(
+                "raw_resource_used_with_unit",
+                f"unit '{ctx.unit_name}' が指定された Plan で raw resource "
+                f"'{target}' が直接使われています。"
+                f"unit role 経由の指定 ($role) を推奨します",
+                instrument=target,
+                field_path="instrument",
+                recommended_next_actions=[
+                    {"action": "use_role_reference",
+                     "reason": f"unit '{ctx.unit_name}' に該当 role を追加し $role で参照"},
+                ],
+            )
 
     ctx.resolved[ref] = resource
     ctx.required_resources.add(resource)
@@ -720,6 +767,51 @@ def _convert_step(
 # ============================================================
 
 
+# ============================================================
+# v0.8.3: unit 解決ヘルパ
+# ============================================================
+
+
+def _resolve_unit_bindings(ctx: _Context) -> None:
+    """plan.unit が指定されていれば experiment_units から bindings を引き、
+    explicit bindings との merge 結果を ctx に格納する。
+
+    解決順序 (実装方針 #2):
+        unit_bindings → explicit_bindings override → alias → raw resource
+    """
+    unit_name = ctx.plan.unit
+    if not unit_name:
+        # unit 指定無し → effective_bindings は plan.bindings そのまま
+        return
+
+    unit = ctx.system_config.get_unit(unit_name)
+    if unit is None:
+        ctx.add_error(
+            "unknown_unit",
+            f"unit '{unit_name}' が system_config.experiment_units に存在しません",
+            field_path="unit",
+            recommended_next_actions=[
+                {"action": "list_experiment_units",
+                 "tool": "list_experiment_units"},
+                {"action": "fix_unit_name",
+                 "reason": "system_config.yaml の experiment_units に該当 unit を追加"},
+            ],
+        )
+        # effective_bindings は explicit のみで継続 (後続 step の解析を進めるため)
+        return
+
+    ctx.unit_bindings = dict(unit.bindings)
+    # merge: unit_bindings + explicit_bindings (explicit が override)
+    merged: dict[str, str] = dict(ctx.unit_bindings)
+    overridden: list[str] = []
+    for k, v in ctx.explicit_bindings.items():
+        if k in merged and merged[k] != v:
+            overridden.append(k)
+        merged[k] = v
+    ctx.effective_bindings = merged
+    ctx.overridden_roles = sorted(overridden)
+
+
 def validate_and_compile(
     plan_dict: dict[str, Any],
     session_mgr: SessionManager,
@@ -744,6 +836,9 @@ def validate_and_compile(
         )
 
     ctx = _Context(plan, session_mgr, system_config)
+
+    # v0.8.3: unit 解決 (effective_bindings の生成 + unit_resolution summary)
+    _resolve_unit_bindings(ctx)
 
     # v0.8.0.1: parallel placement 制約 ── top-level steps の末尾 1 回のみ許可。
     # 中間に parallel を置くと前後の step との実行順序が曖昧になるため、
@@ -794,15 +889,18 @@ def validate_and_compile(
     # 通常の単一 Plan path では main_plan.required_resources = used
     # (現状は両者同値、将来 parallel が独立スケジューラに渡される時に分離)
 
+    unit_resolution = _build_unit_resolution(ctx)
+
     if ctx.errors:
         return CompiledPlan(
             valid=False,
             errors=ctx.errors,
             warnings=ctx.warnings,
-            summary=_make_summary(ctx, plan, used),
+            summary=_make_summary(ctx, plan, used, unit_resolution),
             rendered_steps=list(ctx.rendered_steps),
             resolved_instruments=dict(ctx.resolved),
             used_resources=used,
+            unit_resolution=unit_resolution,
         )
 
     main_plan = Plan(
@@ -819,7 +917,7 @@ def validate_and_compile(
         valid=True,
         errors=[],
         warnings=ctx.warnings,
-        summary=_make_summary(ctx, plan, used),
+        summary=_make_summary(ctx, plan, used, unit_resolution),
         main_plan=main_plan,
         parallel_groups=ctx.parallel_groups,
         has_safe_shutdown=ctx.has_safe_shutdown,
@@ -827,11 +925,26 @@ def validate_and_compile(
         resolved_instruments=dict(ctx.resolved),
         rendered_steps=list(ctx.rendered_steps),
         used_resources=used,
+        unit_resolution=unit_resolution,
     )
 
 
-def _make_summary(ctx: _Context, plan: ExperimentPlan, used: list[str]) -> dict[str, Any]:
+def _build_unit_resolution(ctx: _Context) -> dict[str, Any]:
+    """v0.8.3: unit_resolution summary を組み立てる"""
     return {
+        "unit": ctx.unit_name,
+        "unit_bindings": dict(ctx.unit_bindings),
+        "explicit_bindings": dict(ctx.explicit_bindings),
+        "effective_bindings": dict(ctx.effective_bindings),
+        "overridden_roles": list(ctx.overridden_roles),
+    }
+
+
+def _make_summary(
+    ctx: _Context, plan: ExperimentPlan, used: list[str],
+    unit_resolution: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    s: dict[str, Any] = {
         "dsl_version": plan.dsl_version,
         "name": plan.name,
         "step_count_dsl": len(plan.steps),
@@ -856,3 +969,7 @@ def _make_summary(ctx: _Context, plan: ExperimentPlan, used: list[str]) -> dict[
         "has_parallel": len(ctx.parallel_groups) > 0,
         "parallel_group_count": len(ctx.parallel_groups),
     }
+    # v0.8.3: unit_resolution を summary に同梱 (None でなければ)
+    if unit_resolution is not None:
+        s["unit_resolution"] = unit_resolution
+    return s

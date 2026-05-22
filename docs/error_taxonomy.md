@@ -26,6 +26,9 @@ AI エージェントが「次の判断」を決めるために、`error_class` 
 | `command_not_found` | (実行時) 機器定義の command が未登録 | True |
 | `invalid_since_timestamp` | `get_experiment_timeline(since=...)` の値が ISO8601 でない | True (sub_class) |
 | `invalid_until_timestamp` | `get_experiment_timeline(until=...)` の値が ISO8601 でない | True (sub_class) |
+| `unknown_unit` | `ExperimentPlan.unit` が `experiment_units` に未登録 (v0.8.3) | True |
+| `unit_role_missing` | `$role` が unit / explicit bindings のどちらにも無い (v0.8.3) | True |
+| `template_override_invalid` | `start_experiment_job_from_template` の override に許可外キー (v0.8.3) | True (sub_class) |
 
 > Note (v0.8.2.1): `invalid_since_timestamp` / `invalid_until_timestamp` は
 > `error_class="validation"` の `details.sub_class` として返される。

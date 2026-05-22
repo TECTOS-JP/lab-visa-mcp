@@ -90,6 +90,31 @@ class _JobRuntime:
         return max(0.0, self.deadline - time.monotonic())
 
 
+def _dsl_params(
+    plan_id: str, plan_dict: dict[str, Any], compiled,
+) -> dict[str, Any]:
+    """v0.8.3: jobs.parameters に保存する DSL 固有メタ。
+    template_source は compiled.summary["template_source"] 経由で伝播する
+    (start_experiment_job が呼び出し前に summary に attach 済み)。
+    """
+    p: dict[str, Any] = {
+        "plan_id": plan_id,
+        "dsl_version": plan_dict.get("dsl_version"),
+    }
+    ts = (compiled.summary or {}).get("template_source")
+    if ts:
+        p["template_source"] = dict(ts)
+    return p
+
+
+def _merge_parallel_params(
+    plan_id: str, plan_dict: dict[str, Any], compiled, branch_count: int,
+) -> dict[str, Any]:
+    p = _dsl_params(plan_id, plan_dict, compiled)
+    p["branch_count"] = branch_count
+    return p
+
+
 class JobManager:
     """
     バックグラウンド Job の管理。
@@ -652,6 +677,7 @@ class JobManager:
         override_reason: str = "",
         job_timeout_s: float | None = None,
         queue_policy: QueuePolicy = "queue",
+        template_source: dict[str, Any] | None = None,
     ) -> JobRecord:
         """v0.8.0: DSL plan を validate + compile + 実行する。
 
@@ -711,21 +737,31 @@ class JobManager:
                 },
             )
 
+        # v0.8.3: template_source を summary に attach (なければ no-op)
+        if template_source:
+            try:
+                compiled.summary["template_source"] = dict(template_source)
+            except Exception:
+                pass
+
         # compile OK: parallel が含まれる場合は Map 経由、含まれなければ Recipe Plan 経由
         if compiled.parallel_groups:
-            return await self._start_experiment_with_parallel(
+            rec = await self._start_experiment_with_parallel(
                 plan_id, plan_dict, compiled,
                 owner=owner,
                 override_safety=override_safety, override_reason=override_reason,
                 job_timeout_s=job_timeout_s, queue_policy=queue_policy,
             )
         else:
-            return await self._start_experiment_recipe_path(
+            rec = await self._start_experiment_recipe_path(
                 plan_id, plan_dict, compiled,
                 owner=owner,
                 override_safety=override_safety, override_reason=override_reason,
                 job_timeout_s=job_timeout_s, queue_policy=queue_policy,
             )
+        # template_source は _dsl_params 経由で create_job parameters に
+        # 既に注入済み (compiled.summary["template_source"] から伝播)
+        return rec
 
     async def _start_experiment_recipe_path(
         self,
@@ -751,7 +787,7 @@ class JobManager:
             job_id=job_id, owner=owner,
             resource_name=primary_resource,
             recipe=f"<dsl:{plan_name}>",
-            parameters={"plan_id": plan_id, "dsl_version": plan_dict.get("dsl_version")},
+            parameters=_dsl_params(plan_id, plan_dict, compiled),
         )
 
         # plan 永続化
@@ -1097,7 +1133,7 @@ class JobManager:
             job_id=job_id, owner=owner,
             resource_name=sorted(all_resources)[0] if all_resources else "",
             recipe=f"<dsl_parallel:{plan_name}>",
-            parameters={"plan_id": plan_id, "branch_count": len(targets)},
+            parameters=_merge_parallel_params(plan_id, plan_dict, compiled, len(targets)),
         )
         try:
             self._store.save_experiment_plan(
@@ -1115,7 +1151,7 @@ class JobManager:
             kind="dsl_parallel",
             recipe_label=f"<dsl_parallel:{plan_name}>",
             owner=owner,
-            parameters={"plan_id": plan_id, "branch_count": len(targets)},
+            parameters=_merge_parallel_params(plan_id, plan_dict, compiled, len(targets)),
             targets=targets,
             required_resources=sorted(all_resources),
             concurrency=pg["concurrency"],

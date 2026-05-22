@@ -206,8 +206,13 @@ class ExperimentPlan(BaseModel):
     dsl_version: str = CURRENT_DSL_VERSION
     name: str = ""
     description: str = ""
+    # v0.8.3: experiment_unit 直接参照 (任意)
+    # system_config.experiment_units[unit] の bindings を effective_bindings へ
+    # 展開する。explicit `bindings` は同 role を上書きする (override 優先)。
+    unit: str | None = None
     # bindings: $role 形式の DSL ref を解決するための alias マップ
     # 例: {"psu": "psu001", "dmm": "dmm001"}
+    # unit 指定時はこれが unit_bindings への override として働く。
     bindings: dict[str, str] = Field(default_factory=dict)
     # 全 step 共通の variables (sweep 変数とは別、テンプレート展開用)
     variables: dict[str, Any] = Field(default_factory=dict)
