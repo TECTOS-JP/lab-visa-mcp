@@ -169,8 +169,35 @@ CREATE INDEX IF NOT EXISTS idx_monitor_data_id_ts ON monitor_data(monitor_id, ti
 """
 
 
+# v0.8.0 で追加: experiment_plans + experiment_templates
+_SCHEMA_V0_8_0_ADDITIONS = """
+-- DSL plan の永続化 (v0.8.0): 1 Job につき 1 plan
+CREATE TABLE IF NOT EXISTS experiment_plans (
+    plan_id TEXT PRIMARY KEY,
+    job_id TEXT,
+    name TEXT NOT NULL DEFAULT '',
+    dsl_version TEXT NOT NULL,
+    original_plan_json TEXT NOT NULL,
+    compiled_summary_json TEXT,
+    validation_result_json TEXT,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_experiment_plans_job ON experiment_plans(job_id);
+
+-- 再利用可能テンプレート
+CREATE TABLE IF NOT EXISTS experiment_templates (
+    name TEXT PRIMARY KEY,
+    dsl_version TEXT NOT NULL,
+    plan_json TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+"""
+
+
 # 現行 schema version (PRAGMA user_version で管理)
-CURRENT_SCHEMA_VERSION = 1
+CURRENT_SCHEMA_VERSION = 2
 
 
 def _apply_migrations(conn: sqlite3.Connection) -> int:
@@ -187,13 +214,22 @@ def _apply_migrations(conn: sqlite3.Connection) -> int:
     if current < 1:
         # v0.5.x → v0.7.0: 新規テーブルを追加 (既存 jobs テーブルには触れない)
         conn.executescript(_SCHEMA_V0_7_0_ADDITIONS)
-        conn.execute(f"PRAGMA user_version = {CURRENT_SCHEMA_VERSION}")
+        conn.execute("PRAGMA user_version = 1")
         conn.commit()
         logger.info(
-            "SQLite schema migration: user_version %d → %d (v0.7.0 additions)",
-            current, CURRENT_SCHEMA_VERSION,
+            "SQLite schema migration: user_version 0 → 1 (v0.7.0 additions)",
         )
-        current = CURRENT_SCHEMA_VERSION
+        current = 1
+
+    if current < 2:
+        # v0.7.x → v0.8.0: experiment_plans / experiment_templates 追加
+        conn.executescript(_SCHEMA_V0_8_0_ADDITIONS)
+        conn.execute("PRAGMA user_version = 2")
+        conn.commit()
+        logger.info(
+            "SQLite schema migration: user_version 1 → 2 (v0.8.0 additions)",
+        )
+        current = 2
 
     return current
 
@@ -787,6 +823,150 @@ class JobStore:
             "SELECT COUNT(*) AS n FROM monitor_data",
         ).fetchone()
         return int(row["n"]) if row else 0
+
+    # =====================================================================
+    # v0.8.0: experiment_plans / experiment_templates
+    # =====================================================================
+
+    def save_experiment_plan(
+        self,
+        plan_id: str,
+        *,
+        job_id: str | None,
+        name: str,
+        dsl_version: str,
+        original_plan: dict[str, Any],
+        compiled_summary: dict[str, Any] | None = None,
+        validation_result: dict[str, Any] | None = None,
+    ) -> None:
+        """DSL plan を永続化 (v0.8.0)。"""
+        now = _now_iso()
+        with self._write_lock:
+            self._connect().execute(
+                """
+                INSERT INTO experiment_plans
+                (plan_id, job_id, name, dsl_version,
+                 original_plan_json, compiled_summary_json, validation_result_json,
+                 created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    plan_id, job_id, name, dsl_version,
+                    json.dumps(original_plan, ensure_ascii=False, default=str),
+                    json.dumps(compiled_summary, ensure_ascii=False, default=str)
+                        if compiled_summary else None,
+                    json.dumps(validation_result, ensure_ascii=False, default=str)
+                        if validation_result else None,
+                    now,
+                ),
+            )
+
+    def get_experiment_plan(self, plan_id: str) -> dict[str, Any] | None:
+        row = self._connect().execute(
+            "SELECT * FROM experiment_plans WHERE plan_id=?", (plan_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return {
+            "plan_id": row["plan_id"],
+            "job_id": row["job_id"],
+            "name": row["name"],
+            "dsl_version": row["dsl_version"],
+            "original_plan": json.loads(row["original_plan_json"]),
+            "compiled_summary": (
+                json.loads(row["compiled_summary_json"])
+                if row["compiled_summary_json"] else None
+            ),
+            "validation_result": (
+                json.loads(row["validation_result_json"])
+                if row["validation_result_json"] else None
+            ),
+            "created_at": row["created_at"],
+        }
+
+    def get_experiment_plan_for_job(self, job_id: str) -> dict[str, Any] | None:
+        row = self._connect().execute(
+            "SELECT * FROM experiment_plans WHERE job_id=? "
+            "ORDER BY created_at DESC LIMIT 1",
+            (job_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return {
+            "plan_id": row["plan_id"],
+            "job_id": row["job_id"],
+            "name": row["name"],
+            "dsl_version": row["dsl_version"],
+            "original_plan": json.loads(row["original_plan_json"]),
+            "compiled_summary": (
+                json.loads(row["compiled_summary_json"])
+                if row["compiled_summary_json"] else None
+            ),
+            "validation_result": (
+                json.loads(row["validation_result_json"])
+                if row["validation_result_json"] else None
+            ),
+            "created_at": row["created_at"],
+        }
+
+    def save_experiment_template(
+        self,
+        name: str,
+        dsl_version: str,
+        plan: dict[str, Any],
+        description: str = "",
+    ) -> None:
+        """experiment_templates UPSERT"""
+        now = _now_iso()
+        with self._write_lock:
+            self._connect().execute(
+                """
+                INSERT INTO experiment_templates
+                (name, dsl_version, plan_json, description, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(name) DO UPDATE SET
+                  dsl_version = excluded.dsl_version,
+                  plan_json   = excluded.plan_json,
+                  description = excluded.description,
+                  updated_at  = excluded.updated_at
+                """,
+                (
+                    name, dsl_version,
+                    json.dumps(plan, ensure_ascii=False, default=str),
+                    description, now, now,
+                ),
+            )
+
+    def get_experiment_template(self, name: str) -> dict[str, Any] | None:
+        row = self._connect().execute(
+            "SELECT * FROM experiment_templates WHERE name=?", (name,),
+        ).fetchone()
+        if row is None:
+            return None
+        return {
+            "name": row["name"],
+            "dsl_version": row["dsl_version"],
+            "plan": json.loads(row["plan_json"]),
+            "description": row["description"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        }
+
+    def list_experiment_templates(self) -> list[dict[str, Any]]:
+        rows = self._connect().execute(
+            "SELECT name, dsl_version, description, created_at, updated_at "
+            "FROM experiment_templates ORDER BY updated_at DESC"
+        ).fetchall()
+        return [
+            {
+                "name": r["name"],
+                "dsl_version": r["dsl_version"],
+                "description": r["description"],
+                "created_at": r["created_at"],
+                "updated_at": r["updated_at"],
+            }
+            for r in rows
+        ]
 
     def close(self) -> None:
         conn = getattr(self._local, "conn", None)

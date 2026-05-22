@@ -635,6 +635,461 @@ class JobManager:
             self._runtimes.pop(job_id, None)
 
     # =====================================================================
+    # v0.8.0: Experiment DSL Job
+    # =====================================================================
+
+    async def start_experiment_job(
+        self,
+        plan_dict: dict[str, Any],
+        *,
+        owner: str = "",
+        override_safety: bool = False,
+        override_reason: str = "",
+        job_timeout_s: float | None = None,
+        queue_policy: QueuePolicy = "queue",
+    ) -> JobRecord:
+        """v0.8.0: DSL plan を validate + compile + 実行する。
+
+        plan_dict は ExperimentPlan に準拠した JSON (LLM 出力想定)。
+
+        フロー:
+          1. dsl.compiler.validate_and_compile() で validate + compile
+          2. experiment_plans テーブルに persist
+          3. compiled main_plan を既存 Recipe Job 実行経路で走らせる
+             (parallel が含まれる場合は GroupExecutor に転送)
+          4. plan 末尾の safe_shutdown step は終端時に
+             best_effort_safe_shutdown を実行
+        """
+        import uuid as _uuid
+        from visa_mcp.dsl.compiler import validate_and_compile
+
+        # validate + compile
+        compiled = validate_and_compile(plan_dict, self._sessions, self._system_config)
+        plan_id = f"plan_{_uuid.uuid4().hex[:12]}"
+        plan_name = plan_dict.get("name") or "experiment"
+
+        if not compiled.valid:
+            # validation 失敗: job 作成し、queued → failed に 1 度だけ遷移する。
+            # _record_immediate_failure を使うと validation_errors を result に
+            # 入れられないため、直接遷移を行う。
+            job_id = self._new_job_id()
+            rec = self._store.create_job(
+                job_id=job_id, owner=owner,
+                resource_name="", recipe=f"<dsl:{plan_name}>",
+                parameters={"plan_id": plan_id},
+            )
+            try:
+                self._store.save_experiment_plan(
+                    plan_id=plan_id, job_id=job_id,
+                    name=plan_name,
+                    dsl_version=plan_dict.get("dsl_version", "0.8"),
+                    original_plan=plan_dict,
+                    validation_result={
+                        "valid": False,
+                        "errors": compiled.errors,
+                        "warnings": compiled.warnings,
+                    },
+                )
+            except Exception:
+                pass
+            return self._store.transition_status(
+                job_id, JobStatus.FAILED,
+                error_class="validation",
+                last_step_summary=(
+                    f"DSL validation failed ({len(compiled.errors)} errors)"
+                ),
+                result={
+                    "success": False, "error": "ValidationError",
+                    "plan_id": plan_id,
+                    "validation_errors": compiled.errors,
+                    "validation_warnings": compiled.warnings,
+                },
+            )
+
+        # compile OK: parallel が含まれる場合は Map 経由、含まれなければ Recipe Plan 経由
+        if compiled.parallel_groups:
+            return await self._start_experiment_with_parallel(
+                plan_id, plan_dict, compiled,
+                owner=owner,
+                override_safety=override_safety, override_reason=override_reason,
+                job_timeout_s=job_timeout_s, queue_policy=queue_policy,
+            )
+        else:
+            return await self._start_experiment_recipe_path(
+                plan_id, plan_dict, compiled,
+                owner=owner,
+                override_safety=override_safety, override_reason=override_reason,
+                job_timeout_s=job_timeout_s, queue_policy=queue_policy,
+            )
+
+    async def _start_experiment_recipe_path(
+        self,
+        plan_id: str,
+        plan_dict: dict[str, Any],
+        compiled,
+        *,
+        owner: str,
+        override_safety: bool,
+        override_reason: str,
+        job_timeout_s: float | None,
+        queue_policy: QueuePolicy,
+    ) -> JobRecord:
+        """parallel を含まない DSL plan を「単一 Plan を持つ Job」として実行"""
+        plan_name = plan_dict.get("name") or "experiment"
+        primary_resource = (
+            compiled.main_plan.required_resources[0]
+            if compiled.main_plan.required_resources else ""
+        )
+
+        job_id = self._new_job_id()
+        rec = self._store.create_job(
+            job_id=job_id, owner=owner,
+            resource_name=primary_resource,
+            recipe=f"<dsl:{plan_name}>",
+            parameters={"plan_id": plan_id, "dsl_version": plan_dict.get("dsl_version")},
+        )
+
+        # plan 永続化
+        try:
+            self._store.save_experiment_plan(
+                plan_id=plan_id, job_id=job_id,
+                name=plan_name,
+                dsl_version=plan_dict.get("dsl_version", "0.8"),
+                original_plan=plan_dict,
+                compiled_summary=compiled.summary,
+                validation_result={
+                    "valid": True, "errors": [], "warnings": compiled.warnings,
+                },
+            )
+        except Exception as e:
+            logger.warning("experiment_plans 永続化失敗: %s", e)
+
+        # scheduler 投入
+        required = list(compiled.main_plan.required_resources)
+        try:
+            immediate, blocking = await self._scheduler.enqueue(
+                job_id, required, queue_policy=queue_policy,
+            )
+        except ResourceBusyError as e:
+            return self._store.transition_status(
+                job_id, JobStatus.FAILED,
+                error_class="blocked",
+                last_step_summary=f"resource busy (blocked by {e.blocking_job_id})",
+                result={"success": False, "error": "ResourceBusy",
+                        "message": str(e), "blocking_job_id": e.blocking_job_id,
+                        "plan_id": plan_id},
+            )
+
+        effective_timeout = (
+            DEFAULT_JOB_TIMEOUT_S if job_timeout_s is None else float(job_timeout_s)
+        )
+        deadline = time.monotonic() + effective_timeout if effective_timeout > 0 else None
+
+        task = asyncio.create_task(
+            self._run_experiment_plan_job(
+                rec, compiled,
+                required_resources=required,
+                override_safety=override_safety, override_reason=override_reason,
+                start_immediately=immediate,
+                plan_id=plan_id,
+            ),
+            name=f"job-{job_id}",
+        )
+        self._runtimes[job_id] = _JobRuntime(task, deadline)
+        if not immediate:
+            self._store.update_step(
+                job_id, -1, last_step_summary=f"queued, blocked_by={blocking}",
+            )
+        return rec
+
+    async def _run_experiment_plan_job(
+        self,
+        rec: JobRecord,
+        compiled,
+        *,
+        required_resources: list[str],
+        override_safety: bool,
+        override_reason: str,
+        start_immediately: bool,
+        plan_id: str,
+    ) -> None:
+        """DSL plan の単一 Plan 実行 (recipe job と同じ経路をたどる)"""
+        job_id = rec.job_id
+        try:
+            if not start_immediately:
+                await self._wait_until_scheduled(job_id)
+            await self._scheduler.on_running(job_id)
+
+            runtime = self._runtimes.get(job_id)
+            if runtime is None:
+                return
+            current = self._store.get(job_id)
+            if current is not None and is_terminal(current.status):
+                return
+
+            self._store.transition_status(job_id, JobStatus.RUNNING, current_step_index=0)
+            self._safe_record_event(
+                job_id, "experiment_job_started",
+                payload={"plan_id": plan_id, "dsl": True},
+            )
+
+            # 各 step を _run_job_inner と同様に直列実行
+            # ただし instrument は step.instrument (compile で resource_name に解決済み) を使う
+            step_results: list[dict] = []
+            plan = compiled.main_plan
+            for idx, step in enumerate(plan.steps):
+                if runtime.is_timed_out():
+                    self._record_timeout(rec, idx, step_results)
+                    return
+                if runtime.cancel_mode is not None:
+                    await self._handle_cancel(
+                        rec, self._sessions.get_session(rec.resource_name),
+                        runtime.cancel_mode, step_results,
+                    )
+                    return
+
+                self._store.update_step(
+                    job_id, idx,
+                    last_step_summary=self._step_summary(step),
+                )
+
+                # step 種別ごとに dispatch
+                if isinstance(step, WaitStep):
+                    self._safe_transition(job_id, JobStatus.WAITING)
+                    result = await self._run_wait_with_cancel_check(step, runtime)
+                    self._safe_transition(job_id, JobStatus.RUNNING)
+                elif isinstance(step, WaitUntilStep):
+                    self._safe_transition(job_id, JobStatus.WAITING)
+                    result = await execute_wait_until(
+                        step,
+                        cancel_check=lambda: self._poll_cancel_reason(runtime),
+                        on_progress=lambda p: self._update_progress(runtime, p),
+                    )
+                    runtime.current_progress = None
+                    self._safe_transition(job_id, JobStatus.RUNNING)
+                elif isinstance(step, WaitForConditionStep):
+                    self._safe_transition(job_id, JobStatus.WAITING)
+                    result = await execute_wait_for_condition(
+                        self._visa, self._sessions.get_session, step,
+                        cancel_check=lambda: self._poll_cancel_reason(runtime),
+                        on_progress=lambda p: self._update_progress(runtime, p),
+                    )
+                    runtime.current_progress = None
+                    self._safe_transition(job_id, JobStatus.RUNNING)
+                elif isinstance(step, WaitForStableStep):
+                    self._safe_transition(job_id, JobStatus.WAITING)
+                    result = await execute_wait_for_stable(
+                        self._visa, self._sessions.get_session, step,
+                        cancel_check=lambda: self._poll_cancel_reason(runtime),
+                        on_progress=lambda p: self._update_progress(runtime, p),
+                    )
+                    runtime.current_progress = None
+                    self._safe_transition(job_id, JobStatus.RUNNING)
+                elif isinstance(step, CommandStep):
+                    # DSL では step.instrument が必ず resource_name に解決済み
+                    target_resource = step.instrument or rec.resource_name
+                    target_session = self._sessions.get_session(target_resource)
+                    if target_session is None:
+                        result = {
+                            "success": False, "error": "SessionNotFound",
+                            "message": f"resource {target_resource} の session がありません",
+                        }
+                    else:
+                        result = await execute_command_step(
+                            self._visa, target_session, step,
+                            override_safety=override_safety,
+                            override_reason=override_reason,
+                        )
+                else:
+                    result = {
+                        "success": False, "error": "UnsupportedStepType",
+                        "step_type": getattr(step, "type", "?"),
+                    }
+                step_results.append({"step": idx, **result})
+
+                if not result.get("success", False):
+                    if result.get("interrupted_by_timeout"):
+                        self._record_timeout(rec, idx, step_results)
+                        return
+                    if result.get("interrupted_by_cancel"):
+                        await self._handle_cancel(
+                            rec, self._sessions.get_session(rec.resource_name),
+                            runtime.cancel_mode or CancelMode.AFTER_CURRENT_STEP,
+                            step_results,
+                        )
+                        return
+                    err_class = result.get("error", "internal")
+                    self._store.transition_status(
+                        job_id, JobStatus.FAILED,
+                        current_step_index=idx,
+                        error_class=err_class,
+                        last_step_summary=(
+                            f"step {idx} failed: "
+                            f"{str(result.get('message', result.get('error', '?')))[:80]}"
+                        ),
+                        result=self._with_persistence_warnings(
+                            job_id,
+                            {
+                                "success": False, "recipe": rec.recipe,
+                                "steps_executed": step_results,
+                                "halted_at_step": idx,
+                                "plan_id": plan_id,
+                            },
+                        ),
+                    )
+                    return
+
+            # safe_shutdown step が含まれていた → best_effort 実行
+            shutdown_info = None
+            if compiled.has_safe_shutdown:
+                # 最初の resource の session で実行 (典型的に Plan で使用した全 resource)
+                session = (
+                    self._sessions.get_session(required_resources[0])
+                    if required_resources else None
+                )
+                shutdown_info = await self._best_effort_safe_shutdown(session)
+                step_results.append({
+                    "step": -1, "step_type": "safe_shutdown",
+                    "shutdown": shutdown_info,
+                    "success": bool(
+                        shutdown_info.get("success") or not shutdown_info.get("attempted")
+                    ),
+                })
+
+            self._store.transition_status(
+                job_id, JobStatus.COMPLETED,
+                current_step_index=len(plan.steps) - 1,
+                last_step_summary="experiment completed",
+                result=self._with_persistence_warnings(
+                    job_id,
+                    {
+                        "success": True, "recipe": rec.recipe,
+                        "plan_id": plan_id,
+                        "steps_executed": step_results,
+                        "step_count": len(step_results),
+                        "safe_shutdown": shutdown_info,
+                    },
+                ),
+            )
+
+        except asyncio.CancelledError:
+            self._safe_transition(job_id, JobStatus.CANCELLING)
+            try:
+                self._store.transition_status(
+                    job_id, JobStatus.CANCELLED,
+                    error_class="cancelled",
+                    last_step_summary="cancelled (immediate)",
+                    result={"success": False, "recipe": rec.recipe,
+                            "cancelled": True, "cancel_mode": "immediate",
+                            "plan_id": plan_id},
+                )
+            except Exception:
+                pass
+            raise
+        except Exception as e:
+            logger.exception("experiment job %s で予期しないエラー", job_id)
+            self._store.transition_status(
+                job_id, JobStatus.FAILED,
+                error_class="internal",
+                last_step_summary=f"unexpected: {e}",
+                result={"success": False, "error": "InternalError", "message": str(e),
+                        "plan_id": plan_id},
+            )
+        finally:
+            try:
+                next_jobs = await self._scheduler.on_terminal(job_id, required_resources)
+                for nj_id in next_jobs:
+                    self._wake_queued_job(nj_id)
+            except Exception:
+                pass
+            self._runtimes.pop(job_id, None)
+
+    async def _start_experiment_with_parallel(
+        self,
+        plan_id: str,
+        plan_dict: dict[str, Any],
+        compiled,
+        *,
+        owner: str,
+        override_safety: bool,
+        override_reason: str,
+        job_timeout_s: float | None,
+        queue_policy: QueuePolicy,
+    ) -> JobRecord:
+        """parallel を含む DSL plan を GroupExecutor 経路で実行。
+
+        MVP: parallel が plan の終端付近で 1 度発生する想定。
+        parallel の各 branch を TargetExecution として GroupExecutor に転送。
+        main_plan の (parallel 以外の) 前段 step は parallel 前に直列実行。
+
+        v0.8.0 MVP では「main_plan の前段 + 単一 parallel グループ」を実行する
+        単純形に絞る。複雑な交互順序や末尾の追加 step は v0.8.1+ で対応。
+        """
+        # MVP 実装: parallel の branches だけで Map ジョブを起動。
+        # main_plan の非 parallel 部分は (現状無いので) スキップ。
+        # parallel が 1 グループのみの想定。複数あれば最初のみ扱う。
+        pg = compiled.parallel_groups[0]
+        if len(compiled.parallel_groups) > 1:
+            logger.warning(
+                "v0.8.0 MVP: parallel グループが %d 個ありますが最初のみ実行します",
+                len(compiled.parallel_groups),
+            )
+
+        # 各 branch Plan を TargetExecution に
+        targets: list[TargetExecution] = []
+        all_resources: set[str] = set()
+        for i, branch_plan in enumerate(pg["branch_plans"]):
+            # branch Plan から required_resources を再抽出
+            br_res: set[str] = set()
+            for s in branch_plan.steps:
+                if hasattr(s, "instrument") and getattr(s, "instrument", None):
+                    br_res.add(s.instrument)
+            br_resources = sorted(br_res)
+            all_resources.update(br_res)
+            targets.append(TargetExecution(
+                target_id=f"branch_{i}",
+                plan=branch_plan,
+                required_resources=br_resources,
+                bindings={},
+            ))
+
+        # 主 resource は main_plan / parallel 全体の resource
+        all_resources.update(compiled.main_plan.required_resources)
+
+        plan_name = plan_dict.get("name") or "experiment"
+        job_id = self._new_job_id()
+        rec = self._store.create_job(
+            job_id=job_id, owner=owner,
+            resource_name=sorted(all_resources)[0] if all_resources else "",
+            recipe=f"<dsl_parallel:{plan_name}>",
+            parameters={"plan_id": plan_id, "branch_count": len(targets)},
+        )
+        try:
+            self._store.save_experiment_plan(
+                plan_id=plan_id, job_id=job_id,
+                name=plan_name,
+                dsl_version=plan_dict.get("dsl_version", "0.8"),
+                original_plan=plan_dict,
+                compiled_summary=compiled.summary,
+                validation_result={"valid": True, "errors": [], "warnings": compiled.warnings},
+            )
+        except Exception:
+            pass
+
+        return await self._start_group_or_map_job(
+            kind="dsl_parallel",
+            recipe_label=f"<dsl_parallel:{plan_name}>",
+            owner=owner,
+            parameters={"plan_id": plan_id, "branch_count": len(targets)},
+            targets=targets,
+            required_resources=sorted(all_resources),
+            concurrency=pg["concurrency"],
+            failure_policy={"mode": "continue", "retry": 0},
+            job_timeout_s=job_timeout_s,
+            queue_policy=queue_policy,
+        )
+
+    # =====================================================================
     # v0.7.0: Monitor ジョブ
     # =====================================================================
 

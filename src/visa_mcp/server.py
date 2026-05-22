@@ -13,6 +13,7 @@ from visa_mcp.tools import jobs as jobs_tools
 from visa_mcp.tools import waits as waits_tools
 from visa_mcp.tools import groups as groups_tools
 from visa_mcp.tools import monitor as monitor_tools
+from visa_mcp.tools import dsl as dsl_tools
 from visa_mcp.job import JobManager
 from visa_mcp.system_config import SystemConfig
 from visa_mcp.bus_manager import BusManager
@@ -85,6 +86,8 @@ jobs_tools.register_tools(mcp, job_mgr)
 waits_tools.register_tools(mcp, job_mgr)
 groups_tools.register_tools(mcp, job_mgr)
 monitor_tools.register_tools(mcp, job_mgr)
+# v0.8.0: Experiment DSL ツール
+dsl_tools.register_tools(mcp, session_mgr, job_mgr)
 pdf_extractor.register_tools(mcp)
 
 

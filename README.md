@@ -70,7 +70,7 @@ Claude に話しかける：
 >
 > 「USB0::0x... を identify_instrument で識別して、5V 出力するように設定してください」
 
-## 提供される MCP ツール（32 個 / raw 系は別途オプトイン）
+## 提供される MCP ツール（36 個 / raw 系は別途オプトイン）
 
 ### 識別・情報
 
@@ -127,6 +127,15 @@ Claude に話しかける：
 | `stop_monitor` | Monitor Job を停止 |
 | `get_monitor_data` | Monitor の時系列データを取得 (大量データ向け別ツール、limit≤10000) |
 | `prune_monitor_data` | Monitor Job データを削除 (monitor_id 指定 / older_than_days 指定) ★v0.7.0.1 |
+
+### **Experiment DSL (LLM 向け実験計画)** ★v0.8.0 新規
+
+| ツール | 用途 |
+|-------|------|
+| `validate_experiment_plan` | DSL plan を検証 (resource/command/safety/verify/sweep 上限など 15 項目) |
+| `dry_run_plan` | 実機 I/O 無しで rendered SCPI + safety + verify summary を返す |
+| `start_experiment_job` | validate → compile → persist → Job 実行 (experiment_plans に保存) |
+| `save_experiment_template` | 再利用可能 DSL テンプレートを SQLite に保存 |
 
 ### 取り込み
 

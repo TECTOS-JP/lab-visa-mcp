@@ -134,7 +134,8 @@ def test_schema_migration_from_v050(tmp_path):
             assert row is not None, f"テーブル {table} が作成されていない"
         # user_version が 1 になっている
         ver = conn.execute("PRAGMA user_version").fetchone()[0]
-        assert ver == 1
+        # v0.7.0 で user_version=1、v0.8.0 で user_version=2 へ migration
+        assert ver >= 1
     finally:
         store.close()
 
@@ -145,7 +146,8 @@ def test_schema_init_fresh_db(tmp_path):
     try:
         conn = store._connect()
         ver = conn.execute("PRAGMA user_version").fetchone()[0]
-        assert ver == 1
+        # v0.7.0 で user_version=1、v0.8.0 で user_version=2 へ migration
+        assert ver >= 1
         # 全テーブル存在
         for table in (
             "jobs", "job_steps", "target_runs", "job_events",

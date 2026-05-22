@@ -1,5 +1,167 @@
 # 変更履歴
 
+## v0.8.0 — Plan / Execute DSL
+
+これまで積み上げた Job / Polling / Group / Map / Barrier / Stagger / Verify /
+Persistence を、**AI エージェントが生成する実験計画 (DSL plan)** として受け取り、
+**検証**し、**dry-run** し、**Job として実行**できる段階へ。
+
+### 実装方針 (visa_mcp_v0.8.0の実装方針.md) 採用 5 点
+
+1. **既存 IR 再利用**: DSL → validate → 既存 Plan/Step IR → 既存 Job 実行経路
+2. **新 executor を作らない**: sweep は compile 時展開、parallel は GroupExecutor へ転送
+3. **dry-run は実機 I/O ゼロ**: `*IDN?` / state_query / verify readback も呼ばない
+4. **JSON 限定**: Python 式 / 関数呼び出し / 任意属性アクセス禁止
+5. **DSL schema version**: Plan 内 `dsl_version: "0.8"`、テンプレート table にも version
+
+### DSL 命令 10 種 (`src/visa_mcp/dsl/schema.py`)
+
+| 命令 | 用途 |
+|------|------|
+| `command` / `query` | 機器命令 1 回実行 (既存 CommandStep に compile) |
+| `wait` / `wait_until` | 単純秒待機 / 絶対時刻待機 |
+| `wait_for_condition` / `wait_for_stable` | 条件 / 安定待機 (polling) |
+| `barrier` | parallel 間または target 間同期 |
+| `sweep` | 変数 sweep (compile 時に body を value 数だけ展開) |
+| `parallel` | 複数 branch 並列実行 (GroupExecutor に転送) |
+| `safe_shutdown` | Plan 使用 resource を best_effort 安全停止 |
+
+**実装しない (v0.8.1+)**: branch / loop / nested parallel / quorum / resume /
+emergency_stop / safe_shutdown_all / recipe step
+
+### 上限値 (誤入力防止)
+
+```python
+MAX_SWEEP_POINTS = 200          # 1 sweep の最大展開点数
+MAX_PARALLEL_CONCURRENCY = 10
+MAX_PARALLEL_BRANCHES = 100
+MAX_PLAN_STEPS = 500
+```
+
+例: `{"start": 0, "stop": 10, "step": 0.001}` (10001 点) は schema validation で reject。
+
+### 新規 MCP ツール (4 個、合計 32 → 36)
+
+| ツール | 用途 |
+|--------|------|
+| `validate_experiment_plan` | 構文 + resource + command + safety + verify + sweep 上限 等 15 項目検証 |
+| `dry_run_plan` | rendered SCPI + safety + verify 予定 (実機 I/O 一切なし) |
+| `start_experiment_job` | validate → compile → persist → Job 実行 (Group/Map 経路自動振分け) |
+| `save_experiment_template` | DSL テンプレート保存 (`experiment_templates` テーブル) |
+
+### Validator + Compiler (`src/visa_mcp/dsl/compiler.py`)
+
+15 項目検証:
+
+1. JSON schema (Pydantic)
+2. step type (discriminated union)
+3. instrument / `$role` binding / alias / resource 解決 (4 段階)
+4. command 存在 + type (`query` / `write`)
+5. parameter type / range 検証 (`validate_and_build_scpi`)
+6. safety_mode 連携 (strict で違反 → error、advisory / permissive で warning)
+7. verify 定義 (`readback_command` が query 型か確認)
+8. polling_safe ヒント (polling/monitor で `polling_safe=False` の command 使用時 warning)
+9. required_resources 抽出 (canonical sorted)
+10. sweep 展開サイズ (>200 で reject)
+11. parallel concurrency / branches 上限
+12. rendered SCPI 生成 (dry-run 用)
+13. resolved_instruments map ($psu → resource_name)
+14. estimated_duration_s 算出
+15. recommended_next_actions を errors[] に含める
+
+返り値 `CompiledPlan`:
+
+```python
+@dataclass
+class CompiledPlan:
+    valid: bool
+    errors: list[dict]
+    warnings: list[dict]
+    summary: dict        # step_count_dsl / step_count_expanded / required_resources /
+                         # resolved_instruments / estimated_duration_s / uses_verify /
+                         # uses_polling / has_safe_shutdown / has_parallel
+    main_plan: Plan      # 既存 IR Plan に compile された結果
+    parallel_groups: list[dict]   # parallel ブロックを GroupExecutor 用に分離
+    has_safe_shutdown: bool
+    resolved_instruments: dict[str, str]
+```
+
+### resource 解決順序
+
+1. `plan.bindings` (`$role` 形式: `bindings: {"psu": "psu001"}`)
+2. `_system.yaml` instruments alias
+3. raw VISA resource ("::"を含む文字列) ← 許可するが警告
+
+### 永続化 (SQLite `user_version=2` へ migration)
+
+新規 2 テーブル:
+
+```sql
+experiment_plans
+  plan_id / job_id / name / dsl_version /
+  original_plan_json / compiled_summary_json / validation_result_json / created_at
+
+experiment_templates
+  name (PK) / dsl_version / plan_json / description / created_at / updated_at
+```
+
+`start_experiment_job` 実行時に必ず `experiment_plans` へ保存 (validation 失敗
+時も含めて、何が来たか追跡可能)。
+
+### 実行経路
+
+```text
+LLM JSON plan
+  → validate_experiment_plan (dry)
+  → start_experiment_job
+     → validate_and_compile
+     → save_experiment_plan (DB persist)
+     → if parallel: GroupExecutor 経路 (既存 Map と同じ実行基盤)
+       else:        recipe Plan 経路 (既存単一 Job と同じ実行基盤)
+     → safe_shutdown step あれば終端時に best_effort_safe_shutdown
+```
+
+新しい executor は作らず、既存 `JobManager._run_job_inner` / `GroupExecutor` を
+そのまま呼ぶ「薄い層」として実装。verify / state_query / barrier / stagger /
+polling 等の既存機能はそのまま利用可能。
+
+### スコープ外 (v0.8.1+)
+
+- `branch` 命令 (条件分岐)
+- `loop` 命令 (無制限 loop の危険)
+- `recipe` step (既存 Recipe を DSL から呼び出し)
+- nested parallel / quorum barrier / resume_from_step
+- `safe_shutdown_all` / `emergency_stop` (中途半端な実装が危険なため v0.9.0 で慎重に)
+
+### テスト (20 件追加、合計 342 passed)
+
+`tests/test_dsl_v080.py`:
+
+**必須 3 件**:
+- `test_dry_run_plan_no_visa_io` (validate_and_compile で visa.write/query が 0 回)
+- `test_sweep_rejects_too_many_points` (10001 点を schema_invalid で reject)
+- `test_start_experiment_job_persists_original_plan` (experiment_plans テーブルに
+  original_plan + compiled_summary が保存される)
+
+その他:
+- schema: dsl_version default / unknown version reject / sweep values 展開 / 排他
+- validator: basic / unknown step type / unknown instrument / unknown command /
+  parameter out of range (recommended_next_actions 含む)
+- sweep: values list 展開 / range 展開 / 上限超過 reject
+- parallel: concurrency 上限超過 reject
+- safe_shutdown: marker only (IR には落ちず has_safe_shutdown=True)
+- start_experiment_job: 成功時 persist / 失敗時 validation_errors persist
+- experiment_templates: save / get / 上書き / list
+- compiled_summary に resolved_instruments / uses_verify 反映
+
+### 後方互換
+
+- 既存 32 MCP ツール / v0.7.x YAML / v0.7.x SQLite DB はすべて不変
+- 新規 4 MCP ツール / 2 SQLite テーブル追加のみ
+- 既存 DB は自動 migration (`user_version 1 → 2`、既存テーブルに触れない)
+
+---
+
 ## v0.7.0.1 — 外部レビュー対応 (P0/P1)
 
 v0.7.0 公開後の外部レビューで指摘された P0 三件 + P1 二件への対応。
