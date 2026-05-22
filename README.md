@@ -70,7 +70,7 @@ Claude に話しかける：
 >
 > 「USB0::0x... を identify_instrument で識別して、5V 出力するように設定してください」
 
-## 提供される MCP ツール（38 個 / raw 系は別途オプトイン）
+## 提供される MCP ツール（41 個 / raw 系は別途オプトイン）
 
 ### 識別・情報
 
@@ -138,6 +138,14 @@ Claude に話しかける：
 | `save_experiment_template` | 再利用可能 DSL テンプレートを SQLite に保存 |
 | `list_experiment_templates` | 保存済みテンプレート一覧 ★v0.8.0.1 |
 | `get_experiment_template` | 指定 name のテンプレート (plan JSON 含む) ★v0.8.0.1 |
+
+### **Observation (実験ビュー)** ★v0.8.2 新規
+
+| ツール | 用途 |
+|-------|------|
+| `get_experiment_timeline` | Job 内の時系列イベント (kind / severity / title / summary、monitor_sample デフォルト除外) |
+| `get_job_live_view` | 実行中 Job の集約 (current_phase enum / active_waits / latest_measurements / recent_errors) |
+| `get_job_summary` | 完了 Job の構造化要約 (key_results / failures / verify_summary / recommended_next_actions) |
 
 ### 取り込み
 

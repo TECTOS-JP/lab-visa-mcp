@@ -1,5 +1,174 @@
 # 変更履歴
 
+## v0.8.2 — Observation API + 後方互換ポリシー草案
+
+v0.7.0 以降で蓄積された **job_events / job_steps / target_runs / monitor_data** を、
+AI エージェントと人間が「実験の流れとして読める」構造化ビューへ変換する 3 つの
+read API を追加。実装方針合言葉:「低レベルログを、そのまま返さない。実験の流れ
+として読める構造に変換する」。
+
+加えて、v1.0 で API 凍結対象を明示する `docs/compatibility.md` 草案と
+`error_class` taxonomy 整理 (`docs/error_taxonomy.md`) を導入。
+
+### 新規 MCP ツール (3 個、合計 38 → 41)
+
+| ツール | 役割 |
+|--------|------|
+| `get_experiment_timeline` | **何がいつ起きたか** (時系列) |
+| `get_job_live_view` | **いま何が起きているか** (実行中 Job) |
+| `get_job_summary` | **終了後に何が分かったか** (完了 Job) |
+
+3 ツールは目的が異なり、既存 `get_job_status` / `get_job_result` を置き換えず
+補助 read API として位置付け。
+
+### `get_experiment_timeline(job_id, since, until, limit, kinds, include_raw)`
+
+`job_events` を **内部 event_type → 外部 timeline kind** に正規化して返す:
+
+- **kind enum**: `job / step / target / barrier / stagger / verify / failure /
+  monitor_sample / safe_shutdown`
+- **severity enum**: `info / warning / error / critical`
+- 各 item に `title` / `summary` (短い 1 行説明、LLM/人間両対応)
+- 任意フィールド: `target_id` / `step_index` / `step_path` / `instrument` /
+  `command` / `error_class` / `recoverable` / `measurement` / `value` / `unit`
+- **`monitor_sample` はデフォルト除外** (`kinds=["monitor_sample"]` 明示時のみ含む)
+- pagination: `limit` (default 200, max 5000) + `next_since` (timestamp cursor)
+- `include_raw=True` で元 `job_events` 行を `raw_event` に保持
+
+### `get_job_live_view(job_id)`
+
+実行中 Job の集約ビュー (1 tool call で「いま何が起きているか」が把握できる):
+
+```json
+{
+  "current_phase": "waiting_for_stable",
+  "current_activity": {
+    "kind": "waiting_for_stable",
+    "description": "wait_for_stable psu0.measure_voltage tol=0.1",
+    "step_index": 5
+  },
+  "progress": {"type": "group_or_map", "total_targets": 100,
+               "completed_targets": 37, ...},
+  "latest_measurements": [
+    {"instrument": "psu0", "measurement": "voltage", "value": 5.001,
+     "unit": "V", "age_s": 0.2, "source": "measurement_cache"}
+  ],
+  "active_waits": [{"type": "wait_for_stable", "elapsed_s": 12.3,
+                    "timeout_remaining_s": 287.7, "last_value": 25.31}],
+  "active_barriers": [],
+  "recent_errors": [...],
+  "recent_warnings": [...]
+}
+```
+
+**`current_phase` enum** (v1.0 互換保証候補):
+`queued / starting / running_step / waiting / polling / waiting_for_stable /
+barrier_wait / stagger_wait / monitoring / safe_shutdown / cancelling /
+completed / failed / partial_failure / interrupted / unknown`
+
+`active_waits` / `active_barriers` は `runtime.current_progress` から派生
+(v0.5.1 polling 進捗 + v0.6.1 barrier 進捗の再利用)。
+`latest_measurements` は `measurement_cache` を読み (実機 query を発生させない)。
+
+### `get_job_summary(job_id)`
+
+完了 Job の構造化要約 (`get_job_result` の補完、LLM の次判断材料):
+
+```json
+{
+  "job_status": "partial_failure",
+  "summary": {
+    "total_steps": 120, "completed_steps": 118, "failed_steps": 2,
+    "total_targets": 100, "successful_targets": 98, "failed_targets": 2,
+    "duration_s": 1830.4
+  },
+  "verify_summary": {"total": 50, "passed": 49, "failed": 1},
+  "failures": [
+    {"target_id": "s057", "error_class": "timeout", "recoverable": true}
+  ],
+  "key_results": [...],
+  "recommended_next_actions": [
+    {"action": "retry_failed_targets",
+     "target_ids": ["s057", ...],
+     "reason": "recoverable timeout のみ"}
+  ]
+}
+```
+
+`recommended_next_actions` は **客観的に導ける action のみ** 提示
+(「次の電圧条件を 4.5V に」のような実験条件提案は MCP 側で行わない)。
+
+### Event normalizer (`src/visa_mcp/observation.py`)
+
+3 つの MCP ツールが共有する内部ユーティリティ:
+
+- `normalize_event(row)`: job_events 1 行 → timeline item
+- `event_kind(event_type)` / `event_severity(event_type)`: 内部 → 外部マッピング
+- `compute_current_phase(...)`: phase enum 決定ロジック
+- `filter_kinds(items, kinds, default_exclude_monitor=True)`: 絞り込み
+- `build_run_summary(...)`: summary 構築
+
+### 後方互換ポリシー草案 (`docs/compatibility.md`)
+
+v1.0 で API 凍結対象を **stable / experimental の 2 段階**で整理:
+
+- **Stable (v1.x 互換保証)**: 中核 MCP ツール (validate/dry_run/start_experiment_job /
+  get_job_status / list_resources 等) + response envelope + Job status enum +
+  `error_class` taxonomy + DSL schema `dsl_version=0.8` + 機器 YAML schema +
+  current_phase enum + timeline kind enum
+- **Experimental (v1.x 内で変更可)**: Monitor / Observation / Template / Benchmark
+  (v0.9.0) / Resume / Export / Bundle / Plugin など
+
+### `error_class` taxonomy 整理 (`docs/error_taxonomy.md`)
+
+5 カテゴリで `error_class` 一覧を整理 (v1.0 凍結候補):
+
+1. **validation** (15 件): `unknown_command` / `parameter_invalid` /
+   `safety_violation` / `parallel_placement` / `safe_shutdown_targets_empty` 等
+2. **execution** (10+ 件): `timeout` / `verify_mismatch` / `cancelled` /
+   `interrupted` / `WaitConditionTimeout` / `AsyncStepRequiresJob` 等
+3. **group / map**: `partial_failure` / `target_failed` / `barrier_timeout` /
+   `policy_stop`
+4. **persistence**: `persistence_warning` / `persistence_error`
+5. **system**: `internal` / `not_found` / `configuration_error`
+
+各 error_class に `recoverable` 判定基準を明記。v1.0 以降は新規追加 OK、
+既存意味変更・rename NG。
+
+### スコープ外 (実装しない)
+
+- human_intent / approval / agent_decision_log (v1.3+)
+- start_experiment_job_from_template (v0.8.3)
+- ExperimentPlan root の unit 直接対応 (v0.8.3)
+- WebSocket / SSE push (v2.x)
+- benchmark runner (v0.9.0)
+- export / bundle / resume (v0.9.x / v1.0)
+
+### テスト (19 件追加、合計 394 passed)
+
+`tests/test_observation_v082.py`:
+
+**必須 3 件**:
+- `test_get_experiment_timeline_excludes_monitor_samples_by_default`
+- `test_get_job_live_view_running_wait_for_stable` (current_phase /
+  active_waits 確認)
+- `test_get_job_summary_partial_failure`
+  (successful_targets / failed_targets / recommended_next_actions 確認)
+
+その他:
+- normalizer 単体 (event_kind / severity / normalize_event / include_raw): 4 件
+- compute_current_phase 各 enum: 5 件
+- timeline kinds フィルタ / pagination: 3 件
+- summary (completed_success / verify_failures): 2 件
+- PHASE_ENUM / docs 存在: 3 件
+
+### 後方互換
+
+既存 38 MCP ツール / v0.8.1.1 DSL schema / SQLite DB / event_type 内部名は不変。
+追加は新規 3 ツール + `observation.py` モジュール + 2 docs のみ。
+
+---
+
 ## v0.8.1.1 — 外部レビュー対応 (P0/P1)
 
 v0.8.1 公開後の外部レビューで指摘された P0 一件 + P1 三件への対応。
