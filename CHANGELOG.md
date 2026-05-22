@@ -1,5 +1,59 @@
 # 変更履歴
 
+## v0.9.2.1 — Ecosystem 準備レビュー対応 (P0/P1)
+
+v0.9.2 外部レビュー P0/P1 対応。新規 MCP ツール / CLI 無し、互換維持。
+
+### P0 確認
+
+- raw 改行: 該当 12 ファイル全て **LF only / CR=0 / 多行** で正常確認
+  (`tests/test_v0921_review.py` の parametrized テストでリグレッション防止)。
+- 各ファイルが 5 行以上で潰れていないことを CI で検証。
+
+### P1 改修
+
+- **registry INDEX validation 強化**: `validate_registry` の最初の report
+  として INDEX 自体を lint する `_validate_index_entries` を追加。
+  - `registry_entry_missing_field` (id / vendor / model / category / path)
+    → **error**
+  - `registry_duplicate_id` → **error**
+  - `registry_entry_path_not_found` → **error**
+  - `registry_path_outside_registry` → warning
+  - `invalid_support_level` (INDEX 側、registry 掲載時) → **error**
+    (機器定義単体 lint では引き続き warning)
+- **`docs/registry.md` 新規**: 用語揺れ (`vendor` vs `manufacturer`) /
+  `support_level` 各段階の意味と v1.0 までの強化予定 /
+  `visa-mcp validate plan` が Pydantic schema-only である旨 /
+  `visa-mcp validate registry` の新規 lint 項目を明文化。
+- **`validate_plan_file` docstring に schema-only 注記**: CLI で「Plan
+  として実行可能か」を完全に確認するには MCP tool
+  `validate_experiment_plan` を使うこと、と明記。
+- **`support_level=verified` の自己申告状態を docs 化**: v0.9.2 時点では
+  自己申告、v1.0 で `tested_interfaces` 非空 / 主要 command 網羅 /
+  safe_shutdown 存在を必須条件として強制する予定であることを
+  `docs/registry.md` に記録。
+
+### テスト
+
+- `tests/test_v0921_review.py` 31 件:
+  - repo text files LF only + multi-line (12 ファイル × 2 = 24 件)
+  - registry INDEX validation: missing field / duplicate id / missing path /
+    invalid support_level → 各 error 検出
+  - 現行 `registry/INDEX.yaml` が強化後 lint を通る
+  - `validate_plan_file` docstring に `validate_experiment_plan` 言及
+  - `docs/registry.md` の必須キーワード存在
+- **合計 577 件 passing** (v0.9.2: 546 → v0.9.2.1: 577)
+
+### 互換性
+
+- registry INDEX validation の強化は **追加のみ**。現行 `registry/INDEX.yaml`
+  は無変更で通る。
+- 機器定義単体の `invalid_support_level` は引き続き warning (互換維持)。
+  registry validation 経路でのみ error 昇格。
+- Stable API 不変。
+
+---
+
 ## v0.9.2 — Ecosystem 準備 (Registry / Schema / CLI / 英語 docs)
 
 合言葉:「**実験実行能力を増やすのではなく、外部ユーザーや将来の AI エージェント

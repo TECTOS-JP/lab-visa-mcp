@@ -179,11 +179,112 @@ def validate_instrument_file(path: str | Path) -> ValidationReport:
     return rep
 
 
+REQUIRED_INDEX_FIELDS = ("id", "vendor", "model", "category", "path")
+
+
+def _validate_index_entries(
+    index_path: Path, root: Path,
+) -> ValidationReport:
+    """v0.9.2.1: INDEX.yaml 自体の品質検証 (必須項目 / 重複 ID / path 存在)"""
+    rep = ValidationReport(file=str(index_path),
+                            schema="registry_index (v0.9.2.1)")
+    try:
+        raw = yaml.safe_load(index_path.read_text(encoding="utf-8")) or {}
+    except Exception as e:
+        rep.status = "error"
+        rep.errors.append({
+            "error_class": "schema_invalid",
+            "message": f"INDEX.yaml parse failed: {e}",
+        })
+        return rep
+
+    entries = raw.get("instruments") or []
+    if not isinstance(entries, list):
+        rep.status = "error"
+        rep.errors.append({
+            "error_class": "schema_invalid",
+            "message": "INDEX.yaml.instruments は list が必要",
+        })
+        return rep
+
+    seen_ids: set[str] = set()
+    for i, item in enumerate(entries):
+        if not isinstance(item, dict):
+            rep.errors.append({
+                "error_class": "schema_invalid",
+                "message": f"entry[{i}] は dict が必要",
+            })
+            continue
+        # 必須項目
+        for fld in REQUIRED_INDEX_FIELDS:
+            if not item.get(fld):
+                rep.errors.append({
+                    "error_class": "registry_entry_missing_field",
+                    "message": (
+                        f"entry[{i}] (id={item.get('id', '?')!r}) に "
+                        f"'{fld}' が無い"
+                    ),
+                    "field_path": f"instruments[{i}].{fld}",
+                })
+        # 重複 id
+        eid = item.get("id")
+        if eid:
+            if eid in seen_ids:
+                rep.errors.append({
+                    "error_class": "registry_duplicate_id",
+                    "message": f"id={eid!r} が重複",
+                    "field_path": f"instruments[{i}].id",
+                })
+            seen_ids.add(eid)
+        # path 存在 + registry 配下
+        p = item.get("path")
+        if p:
+            full = (root / p) if not Path(p).is_absolute() else Path(p)
+            if not full.exists():
+                rep.errors.append({
+                    "error_class": "registry_entry_path_not_found",
+                    "message": f"entry[{i}] path={p!r} が存在しません",
+                    "field_path": f"instruments[{i}].path",
+                })
+            else:
+                try:
+                    full.resolve().relative_to(root.resolve())
+                except ValueError:
+                    rep.warnings.append({
+                        "warning_class": "registry_path_outside_registry",
+                        "message": (
+                            f"entry[{i}] path={p!r} が registry/ 配下では"
+                            f"ありません"
+                        ),
+                        "field_path": f"instruments[{i}].path",
+                    })
+        # support_level の語彙チェック (registry 側では error にする)
+        sl = item.get("support_level")
+        if sl is not None and sl not in SUPPORT_LEVELS:
+            rep.errors.append({
+                "error_class": "invalid_support_level",
+                "message": (
+                    f"entry[{i}] support_level={sl!r} は "
+                    f"{list(SUPPORT_LEVELS)} のいずれかが必要"
+                ),
+                "field_path": f"instruments[{i}].support_level",
+            })
+
+    if rep.errors:
+        rep.status = "error"
+    elif rep.warnings:
+        rep.status = "warning"
+    return rep
+
+
 def validate_registry(index_path: str | Path) -> list[ValidationReport]:
-    """INDEX.yaml に列挙された全機器定義を検証"""
+    """INDEX.yaml に列挙された全機器定義を検証 (INDEX 自身 + 各 entry)"""
     idx = load_registry_index(index_path)
     out: list[ValidationReport] = []
     root = idx.root or Path(index_path).parent
+    # v0.9.2.1: INDEX 自体の lint (必須項目 / 重複 / path / support_level)
+    index_rep = _validate_index_entries(Path(index_path), root)
+    out.append(index_rep)
     for e in idx.instruments:
         defn_path = root / e.path if not Path(e.path).is_absolute() else Path(e.path)
         rep = validate_instrument_file(defn_path)
@@ -220,7 +321,13 @@ def validate_registry(index_path: str | Path) -> list[ValidationReport]:
 
 
 def validate_plan_file(path: str | Path) -> ValidationReport:
-    """DSL plan JSON / YAML をパースして ExperimentPlan として validate"""
+    """DSL plan JSON / YAML をパースして ExperimentPlan として validate
+
+    **重要 (v0.9.2.1 docs 明記)**: ここでの validation は **Pydantic schema 確認**
+    のみ。system_config / instrument 定義の参照解決 / safety / resource は
+    **行わない**。これらを含む完全 validation は MCP tool
+    `validate_experiment_plan` (`validate_and_compile` 経由) を使ってください。
+    """
     rep = ValidationReport(file=str(path), schema="dsl.schema.json")
     p = Path(path)
     if not p.exists():
