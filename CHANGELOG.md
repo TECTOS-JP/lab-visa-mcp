@@ -1,5 +1,108 @@
 # 変更履歴
 
+## v1.8.0 — Instrument Definition Authoring
+
+合言葉: **「instrument YAML を作りやすくする」**
+
+v1.7 で **空 directory から pack 雛形** が作れるようになった。v1.8 では
+pack の中身、つまり **instrument YAML を category 別 template から
+scaffold** できるようにし、pack に **`add-instrument`** で登録する
+ところまで CLI 化する。
+
+> MCP tool 追加ゼロ (Stable 43 / Experimental 7 / 合計 50 不変)。
+> PDF → YAML 自動抽出 / LLM 自動定義生成 / 実機自動検証 / remote
+> registry / Python plugin / backend plugin にはまだ進まない。
+
+### 新規 CLI subcommands
+
+```bash
+# 単体 instrument YAML を生成 (pack 非依存)
+visa-mcp instrument scaffold <category> --output <file>
+    [--manufacturer "..."] [--model "..."] [--force] [--json]
+
+# pack に instrument を追加 (scaffold + extension.yaml 更新 + registry index)
+visa-mcp extension add-instrument <pack_dir>
+    --id <instrument_id> --category <category>
+    [--manufacturer "..."] [--model "..."]
+    [--dry-run] [--force] [--json]
+```
+
+`<category>` は `power_supply` / `dmm` / `temperature_meter` /
+`generic_scpi` の 4 種。
+
+### 新規 module
+
+**`src/visa_mcp/instrument_authoring.py`**:
+
+- `scaffold_instrument_definition(category, *, output, manufacturer,
+  model, force)` → `ScaffoldResult`
+  - 4 category template (multi-line YAML)
+  - 生成 YAML は **`support_level: draft`** 固定
+  - `metadata.manual_ref` に必ず TODO placeholder
+  - 冒頭に「THIS IS A DRAFT DEFINITION」コメント
+  - 生成直後に `validate_instrument_file` を error 0 で通る
+- `add_instrument_to_pack(pack_dir, *, instrument_id, category, ...,
+  dry_run, force)` → `AddInstrumentResult`
+  - 既存 instrument file: `--force` 必須
+  - **registry id 重複は `--force` でも拒否**
+  - pack 事前 validate / 更新後 validate を実施
+  - 更新後 validate 失敗時は **rollback** (instrument YAML /
+    extension.yaml / registry_entries/INDEX.yaml の元 state 復元)
+  - `--dry-run`: file 書き込み・lockfile 編集ゼロ + `changes_preview`
+
+### power_supply template の中身 (v1.8)
+
+AI agent 向けに「安全な構造」を最初から含む:
+
+- `safety.ratings` (voltage / current の rated / absolute_max /
+  recommended_max / unit)
+- `safety.preconditions` (`set_output ON` 前に
+  `set_voltage` + `set_current_limit` 必須、severity: high)
+- `safe_shutdown` (`OUTP OFF` → `VOLT 0` の 2 step)
+- `state_query` (voltage_set / current_limit / voltage_measured /
+  current_measured / output_state + ON/OFF map)
+- `verify` (`set_voltage` / `set_current_limit` の read-back tolerance)
+- `polling_safe: true` (query 系)
+
+### 新規 docs
+
+- **`docs/instrument_authoring.md`**: scaffold → validate →
+  add-instrument workflow / category 別 template / draft policy /
+  manual_ref / support_level 昇格目安
+- `CONTRIBUTING.md`: 「Instrument definition の追加」section + PR
+  checklist を追加
+
+### 新規 error_class
+
+- `instrument_scaffold_unknown_category`
+- `instrument_scaffold_target_exists`
+- `add_instrument_invalid_id`
+- `add_instrument_target_exists`
+- `add_instrument_duplicate_registry_id`
+- `add_instrument_pack_invalid`
+- `add_instrument_rolled_back`
+
+### 新規 warning_class
+
+- `instrument_definition_draft`
+
+### 互換性
+
+- 既存 CLI 引数 / public API / schema すべて不変
+- 新規 top-level `instrument` subcommand と `extension add-instrument`
+  は完全新規
+- Stable 43 / Experimental 7 / 合計 50 不変
+
+### v1.8 で対応しない (v1.9+ 候補)
+
+- PDF / datasheet → YAML 自動抽出の本格化
+- LLM 完全自動生成 (人間 review 前提)
+- 実機自動検証 (CI hardware loop)
+- `instrument lint` 専用 CLI (現状 `validate instrument` で代替)
+- remote registry / Python plugin / backend plugin
+
+---
+
 ## v1.7.1 — v1.7.0 レビュー応答 (--force warning / doctor 分類表示 / docs 補強)
 
 合言葉: **「authoring の挙動と判定基準を contributor に分かりやすく伝える」**

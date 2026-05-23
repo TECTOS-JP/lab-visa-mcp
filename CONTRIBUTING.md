@@ -34,6 +34,41 @@ visa-mcp extension check com.example.my_pack
 
 詳細は [`docs/extension_authoring.md`](docs/extension_authoring.md)。
 
+### 1.5 Instrument definition の追加 (v1.8)
+
+pack に instrument YAML を 1 件足す場合の最短手順:
+
+```bash
+# 単体 YAML の試作
+visa-mcp instrument scaffold power_supply \
+    --output instruments/kikusui_pmx.yaml \
+    --manufacturer "Kikusui" --model "PMX-A"
+visa-mcp validate instrument instruments/kikusui_pmx.yaml
+
+# pack に登録 (scaffold + extension.yaml 更新 + registry index)
+visa-mcp extension add-instrument my_pack \
+    --id kikusui_pmx --category power_supply \
+    --manufacturer "Kikusui" --model "PMX-A" --dry-run
+visa-mcp extension add-instrument my_pack \
+    --id kikusui_pmx --category power_supply \
+    --manufacturer "Kikusui" --model "PMX-A"
+```
+
+instrument PR checklist:
+
+- [ ] `instrument scaffold` または等価の手動雛形から始める
+- [ ] `metadata.manual_ref` に manual の **題名 / リビジョン / page range**
+      を明記
+- [ ] `safety` / `safe_shutdown` / `state_query` / `verify` を確認
+- [ ] `visa-mcp validate instrument <file>` が通る
+- [ ] pack に組み込んだ後 `visa-mcp extension doctor --strict` が通る
+- [ ] `support_level` を実態に合わせて設定
+      (LLM 生成のみは draft 必須)
+- [ ] `verified` の場合は `metadata.validation_evidence` を埋める
+      (tested_by / tested_at / interface / firmware / tested_items)
+
+詳細は [`docs/instrument_authoring.md`](docs/instrument_authoring.md)。
+
 ## 2. Definition pack PR の checklist
 
 registry / 公開向け pack は **以下すべて** が望ましいです。CI で

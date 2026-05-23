@@ -1,5 +1,5 @@
 """
-v1.7: visa-mcp CLI
+v1.8: visa-mcp CLI
 
 Usage:
   visa-mcp validate instrument <path>
@@ -25,6 +25,11 @@ Usage:
       [--id <ext-id>] [--template <name>] [--author <name>] [--force]
   visa-mcp extension package <ext.yaml> --dry-run [--json] # v1.7
   visa-mcp extension doctor <ext.yaml> [--strict] [--json] # v1.7
+  visa-mcp instrument scaffold <category> --output <file>  # v1.8
+      [--manufacturer "..."] [--model "..."] [--force]
+  visa-mcp extension add-instrument <pack_dir>             # v1.8
+      --id <id> --category <category>
+      [--manufacturer "..."] [--model "..."] [--dry-run] [--force]
   visa-mcp registry overlay [--source builtin|extension]   # v1.4
   visa-mcp serve
 
@@ -420,6 +425,71 @@ def build_parser() -> argparse.ArgumentParser:
     )
     ext_doc.add_argument("--json", action="store_true")
     ext_doc.set_defaults(func=cmd_extension)
+
+    # v1.8: extension add-instrument
+    ext_ai = ext_sub.add_parser(
+        "add-instrument",
+        help=(
+            "(v1.8) pack に instrument YAML + registry entry を追加"
+        ),
+    )
+    ext_ai.add_argument("pack_dir", help="extension.yaml を含む pack dir")
+    ext_ai.add_argument(
+        "--id", dest="instrument_id", required=True,
+        help="registry id (小文字英数 + _ / -)",
+    )
+    ext_ai.add_argument(
+        "--category", required=True,
+        choices=["power_supply", "dmm", "temperature_meter",
+                  "generic_scpi"],
+        help="instrument scaffold category",
+    )
+    ext_ai.add_argument("--manufacturer", default="TODO")
+    ext_ai.add_argument("--model", default="TODO")
+    ext_ai.add_argument(
+        "--dry-run", action="store_true",
+        help="変更予定だけ表示して file は触らない",
+    )
+    ext_ai.add_argument(
+        "--force", action="store_true",
+        help=(
+            "既存 instrument file を上書き (registry id 重複は force "
+            "でも拒否)"
+        ),
+    )
+    ext_ai.add_argument("--json", action="store_true")
+    ext_ai.set_defaults(func=cmd_extension)
+
+    # v1.8: instrument scaffold (top-level instrument subcommand)
+    inst = sub.add_parser(
+        "instrument",
+        help="(v1.8) instrument definition authoring",
+    )
+    inst_sub = inst.add_subparsers(dest="inst_command", required=True)
+    inst_sc = inst_sub.add_parser(
+        "scaffold",
+        help=(
+            "(v1.8) category 別 template から instrument YAML を生成 "
+            "(support_level: draft 固定)"
+        ),
+    )
+    inst_sc.add_argument(
+        "category",
+        choices=["power_supply", "dmm", "temperature_meter",
+                  "generic_scpi"],
+    )
+    inst_sc.add_argument(
+        "--output", required=True,
+        help="生成先 file path (e.g. instruments/kikusui_pmx.yaml)",
+    )
+    inst_sc.add_argument("--manufacturer", default="TODO")
+    inst_sc.add_argument("--model", default="TODO")
+    inst_sc.add_argument(
+        "--force", action="store_true",
+        help="既存 file を上書き",
+    )
+    inst_sc.add_argument("--json", action="store_true")
+    inst_sc.set_defaults(func=cmd_instrument)
 
     # v1.4: registry overlay
     reg = sub.add_parser(
@@ -851,7 +921,79 @@ def cmd_extension(args: argparse.Namespace) -> int:
                     print(f"    fix?   {a['action']}: {a['reason']}")
         return 0 if data["status"] != "error" else 1
 
+    if sub == "add-instrument":
+        from visa_mcp.instrument_authoring import add_instrument_to_pack
+        res = add_instrument_to_pack(
+            args.pack_dir,
+            instrument_id=args.instrument_id,
+            category=args.category,
+            manufacturer=args.manufacturer,
+            model=args.model,
+            dry_run=args.dry_run,
+            force=args.force,
+        )
+        data = res.to_dict()
+        if args.json:
+            print(json.dumps({"add_instrument": data},
+                              ensure_ascii=False, indent=2, default=str))
+        else:
+            icon = "[OK]" if data["status"] == "ok" else "[ERR]"
+            mark = "DRY-RUN " if data["dry_run"] else ""
+            print(f"{icon} {mark}add-instrument {args.instrument_id} "
+                  f"({args.category}) -> {args.pack_dir}")
+            if data["instrument_file"]:
+                print(f"  instrument_file : {data['instrument_file']}")
+            print(f"  contents_updated: "
+                  f"{data['extension_contents_updated']}")
+            print(f"  registry_added  : {data['registry_entry_added']}")
+            if data["changes_preview"]:
+                print(f"  preview         : {data['changes_preview']}")
+            for e in data["errors"]:
+                print(f"  ERROR  {e.get('error_class')}: "
+                      f"{e.get('message')}")
+            for w in data["warnings"]:
+                print(f"  WARN   {w.get('warning_class')}: "
+                      f"{w.get('message')}")
+        return 0 if data["status"] == "ok" else 1
+
     print(f"unknown extension sub-command: {sub}", file=sys.stderr)
+    return 2
+
+
+def cmd_instrument(args: argparse.Namespace) -> int:
+    """v1.8: instrument scaffold (top-level)"""
+    if args.inst_command == "scaffold":
+        from visa_mcp.instrument_authoring import (
+            scaffold_instrument_definition,
+        )
+        res = scaffold_instrument_definition(
+            args.category,
+            output=args.output,
+            manufacturer=args.manufacturer,
+            model=args.model,
+            force=args.force,
+        )
+        data = res.to_dict()
+        if args.json:
+            print(json.dumps({"scaffold": data},
+                              ensure_ascii=False, indent=2, default=str))
+        else:
+            icon = "[OK]" if data["status"] == "ok" else "[ERR]"
+            print(f"{icon} scaffold {args.category} -> "
+                  f"{data['output_path']}")
+            for e in data["errors"]:
+                print(f"  ERROR  {e.get('error_class')}: "
+                      f"{e.get('message')}")
+            for w in data["warnings"]:
+                print(f"  WARN   {w.get('warning_class')}: "
+                      f"{w.get('message')}")
+            if data["status"] == "ok":
+                print("  next: visa-mcp validate instrument "
+                      f"{data['output_path']}")
+        return 0 if data["status"] == "ok" else 1
+
+    print(f"unknown instrument sub-command: {args.inst_command}",
+          file=sys.stderr)
     return 2
 
 
