@@ -1,5 +1,118 @@
 # 変更履歴
 
+## v1.3.0 — Local Definition Pack Management (no executable code, no remote)
+
+合言葉: **「definition pack を『作れる』から『安全に導入できる』へ」**
+
+v1.3 では Python plugin / remote install / signature を**実装しない**。
+代わりに、v1.2 で検証可能になった definition pack を **ローカル user 領域
+へ安全に install / list / uninstall** できるようにし、built-in registry
+との **overlay registry** 統合を提供する。
+
+### 新規 MCP ツール: **ゼロ** (Stable 43 / Experimental 7 / 合計 50 不変)
+
+v1.3 は引き続き MCP surface を増やさない。新機能は **CLI のみ**。
+
+### 新規 CLI subcommands
+
+```bash
+visa-mcp extension install <path-to-extension.yaml> [--force] [--json]
+visa-mcp extension list [--json]
+visa-mcp extension uninstall <extension_id> [--json]
+visa-mcp extension validate-installed [--json]
+```
+
+### 新規 module
+
+**`src/visa_mcp/extension_install.py`**:
+
+- `install_definition_pack(yaml_path, *, force, ...)`:
+  validate → duplicate チェック → staging copy → atomic rename →
+  sha256 metadata 保存 → lockfile 更新
+- `list_installed_packs(...)` → lockfile 一覧
+- `uninstall_definition_pack(extension_id, ...)`
+- `load_overlay_registry(builtin_path, ...)` → built-in + installed
+  packs を統合、duplicate id を error 検出
+- 既定 path: `~/.visa-mcp/extensions/<extension_id>/` + lockfile
+  `~/.visa-mcp/extensions.lock.json`
+- 各 file の sha256 を `.install_meta.json` に記録
+
+### 安全策
+
+- **path traversal / 絶対パス拒否** (v1.2.1 で実装済の
+  `validate_extension_file` を install 前に必ず通す)
+- **`executable_code: true` は schema レベルで拒否** (v1.2 から継続)
+- **Python code 実行なし** (ロード時に import / exec しない)
+- **リモート URL からの install なし** (ローカル path のみ)
+- **atomic rename** で staging 途中失敗時に中途半端な install を残さない
+- **duplicate `extension_id`** はデフォルトで拒否
+  (`extension_duplicate_install`)、`--force` で上書き許可
+
+### Overlay registry
+
+```text
+effective registry  =  built-in registry  +  installed pack の registry_entries
+```
+
+各 entry は `source` を持ち、由来 (`builtin` / `extension`) を区別:
+
+- built-in と extension の id 衝突 → **error** (`overlay_registry_duplicate_id`)
+- extension 同士の id 衝突 → **error**
+- v1.3 では暗黙の override / 明示 override を **提供しない** (AI agent への安全側)
+
+### 新規 / 更新 docs
+
+| ファイル | 内容 |
+|---------|------|
+| `docs/extension_install.md` (新規) | install 先 / フロー / metadata / lockfile / 安全策 / duplicate / uninstall / v1.4+ 候補 |
+| `docs/extension_registry_overlay.md` (新規) | overlay の意味 / source 区別 / 衝突ルール / API 例 |
+| `docs/v1_stability_policy.md` (更新) | extension install を **experimental operational feature** として注記 |
+
+### 新規 error_class (sub_class)
+
+- `extension_duplicate_install` (sub_class、`validation` 経由)
+- `extension_validation_failed` (sub_class、`validation` 経由)
+- `overlay_registry_duplicate_id` (sub_class、`validation` 経由)
+
+### テスト
+
+`tests/test_v13_extension_install.py` 29 件:
+
+- version v1.3 / Stable 43 不変 / Experimental 7 不変
+- install success / writes lockfile / metadata に sha256
+- duplicate (force なし → 拒否、force → 上書き)
+- invalid pack (executable_code=true) 拒否
+- path traversal 拒否
+- list (空 / install 後)
+- uninstall (実体削除 + lockfile から削除 / not_found)
+- overlay registry (builtin のみ / extension 追加 / duplicate id 検出)
+- CLI extension help / 空 list
+- repo format guard (LF + multiline 4 ファイル × 2)
+- docs 必須キーワード (extension_install / overlay / v1_stability)
+
+旧 v1.2 / v1.2.1 version assertion を v1.x 系列全般許容に微調整。
+
+**合計 827 件 passing** (v1.2.1: 798 → v1.3.0: 827)
+
+### 互換性
+
+- **新規追加** のみ (CLI / module / docs)
+- **Stable / Experimental MCP tools 不変** (Stable 43 / Experimental 7 / 計 50)
+- 既存 example pack (`mock_basic_pack`) は引き続き install 可能
+- DB schema / response envelope / error_class core 全て不変
+
+### スコープ外 (v1.4+ 候補)
+
+- リモート URL / git からの install
+- digital signature / trust store / automatic update
+- Plugin entry_points discovery
+- `visa-mcp extension upgrade` 専用フラグ
+- 明示 override (extension が builtin を上書きする宣言)
+- Remote registry / pull CLI
+- Python code 実行
+
+---
+
 ## v1.2.1 — v1.2 レビュー対応 (P0/P1/P2)
 
 v1.2.0 外部レビュー対応。新規 MCP ツール / CLI 無し、互換維持。

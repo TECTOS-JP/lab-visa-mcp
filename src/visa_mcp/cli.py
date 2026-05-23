@@ -13,6 +13,7 @@ Usage:
 """
 from __future__ import annotations
 import argparse
+from pathlib import Path
 import json
 import sys
 from pathlib import Path
@@ -156,6 +157,41 @@ def build_parser() -> argparse.ArgumentParser:
     serve = sub.add_parser("serve", help="MCP server を起動 (default)")
     serve.set_defaults(func=cmd_serve)
 
+    # v1.3: extension management
+    ext = sub.add_parser(
+        "extension",
+        help="(v1.3) definition pack install / list / uninstall",
+    )
+    ext_sub = ext.add_subparsers(dest="ext_command", required=True)
+
+    ext_install = ext_sub.add_parser(
+        "install", help="extension.yaml を local user 領域へ install",
+    )
+    ext_install.add_argument("path", help="extension.yaml の path")
+    ext_install.add_argument(
+        "--force", action="store_true",
+        help="同 extension_id が既存でも上書き install",
+    )
+    ext_install.add_argument("--json", action="store_true",
+                              help="JSON 出力 (CI 向け)")
+    ext_install.set_defaults(func=cmd_extension)
+
+    ext_list = ext_sub.add_parser("list", help="installed extensions 一覧")
+    ext_list.add_argument("--json", action="store_true")
+    ext_list.set_defaults(func=cmd_extension)
+
+    ext_un = ext_sub.add_parser("uninstall", help="extension を取り除く")
+    ext_un.add_argument("extension_id", help="extension_id を指定")
+    ext_un.add_argument("--json", action="store_true")
+    ext_un.set_defaults(func=cmd_extension)
+
+    ext_val = ext_sub.add_parser(
+        "validate-installed",
+        help="built-in registry + installed extensions の overlay 整合検証",
+    )
+    ext_val.add_argument("--json", action="store_true")
+    ext_val.set_defaults(func=cmd_extension)
+
     return parser
 
 
@@ -163,6 +199,97 @@ def cmd_serve(args: argparse.Namespace) -> int:
     from visa_mcp.server import main as server_main
     server_main()
     return 0
+
+
+def cmd_extension(args: argparse.Namespace) -> int:
+    """v1.3: extension install / list / uninstall / validate-installed"""
+    from visa_mcp.extension_install import (
+        install_definition_pack, list_installed_packs,
+        uninstall_definition_pack, load_overlay_registry,
+    )
+    sub = args.ext_command
+
+    if sub == "install":
+        res = install_definition_pack(args.path, force=args.force)
+        data = res.to_dict()
+        return _emit_extension({
+            "status": data["status"],
+            "file": str(args.path),
+            "schema": "extension_install (v1.3)",
+            "errors": data["errors"],
+            "warnings": data["warnings"],
+            "extension_id": data["extension_id"],
+            "version": data["version"],
+            "install_path": data["install_path"],
+        }, args.json)
+
+    if sub == "list":
+        packs = list_installed_packs()
+        if args.json:
+            print(json.dumps(
+                {"installed_extensions": packs}, ensure_ascii=False,
+                indent=2, default=str,
+            ))
+        else:
+            if not packs:
+                print("(no installed extensions)")
+            else:
+                for p in packs:
+                    print(
+                        f"  {p.get('extension_id')} "
+                        f"v{p.get('version')}  →  {p.get('path')}"
+                    )
+        return 0
+
+    if sub == "uninstall":
+        res = uninstall_definition_pack(args.extension_id)
+        return _emit_extension({
+            "status": res.get("status", "error"),
+            "file": args.extension_id,
+            "schema": "extension_uninstall (v1.3)",
+            "errors": res.get("errors", []),
+            "warnings": [],
+            "extension_id": args.extension_id,
+            "removed_path": res.get("removed_path"),
+        }, args.json)
+
+    if sub == "validate-installed":
+        # built-in registry も同時に overlay 統合
+        builtin = (Path(__file__).parent.parent.parent / "registry"
+                   / "INDEX.yaml")
+        rep = load_overlay_registry(builtin if builtin.exists() else None)
+        if args.json:
+            print(json.dumps(
+                {"overlay_registry": rep.to_dict()},
+                ensure_ascii=False, indent=2, default=str,
+            ))
+        else:
+            icon = {"ok": "[OK]", "warning": "[WARN]",
+                    "error": "[ERR]"}.get(rep.status, "[?]")
+            print(f"{icon} overlay registry  status={rep.status}  "
+                  f"entries={len(rep.entries)}")
+            for e in rep.errors:
+                print(f"  ERROR  {e.get('error_class')}: {e.get('message')}")
+            for w in rep.warnings:
+                print(f"  WARN   {w.get('warning_class')}: "
+                      f"{w.get('message')}")
+        return 0 if rep.status != "error" else 1
+
+    print(f"unknown extension sub-command: {sub}", file=sys.stderr)
+    return 2
+
+
+def _emit_extension(rep: dict, as_json: bool) -> int:
+    if as_json:
+        print(json.dumps({"reports": [rep]},
+                          ensure_ascii=False, indent=2, default=str))
+    else:
+        print(_fmt_human(rep))
+        if rep.get("install_path"):
+            print(f"  installed: {rep['install_path']}")
+        if rep.get("removed_path"):
+            print(f"  removed: {rep['removed_path']}")
+    return 0 if rep.get("status") != "error" else 1
 
 
 def main() -> int:

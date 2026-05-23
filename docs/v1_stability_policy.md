@@ -245,6 +245,13 @@ v1.x で禁止:
 > 予定なし。詳細は [`docs/extension_policy.md`](extension_policy.md) /
 > [`docs/definition_packs.md`](definition_packs.md)。
 
+> **Definition pack install (`visa-mcp extension install/list/uninstall`)**
+> (v1.3 新規) は **experimental operational feature**。lockfile / install
+> metadata / overlay registry の構造は v1.x 内で変更可能。
+> **リモート install / signature / Python plugin は引き続き未対応**。
+> 詳細は [`docs/extension_install.md`](extension_install.md) /
+> [`docs/extension_registry_overlay.md`](extension_registry_overlay.md)。
+
 > **Replay backend** は **概念整理のみ** (v1.2 では実装しない)。
 > `inspect_experiment_bundle.compatibility.can_be_replayed=false` を
 > 引き続き返す。詳細は [`docs/replay_backend_concept.md`](replay_backend_concept.md)。
