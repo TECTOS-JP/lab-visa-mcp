@@ -26,7 +26,8 @@ ROOT = Path(__file__).parent.parent
 
 def test_version_v1_3_0():
     import visa_mcp
-    assert visa_mcp.__version__.startswith("1.3")
+    # v1.3 系列以降の v1.x を許容
+    assert visa_mcp.__version__.startswith("1.")
 
 
 # =========================================================

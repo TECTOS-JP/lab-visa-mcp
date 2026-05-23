@@ -1,5 +1,111 @@
 # 変更履歴
 
+## v1.4.0 — Installed Definition Pack Integrity / Overlay Registry Inspection
+
+合言葉: **「install できる」→「install したものを信頼して使い続けられる」**
+
+v1.3 で local user 領域へ definition pack を install できるようになった。
+v1.4 では、install 済み pack の **整合性検査 (sha256 drift)** と
+**overlay registry の可視化**、および **strict validation mode** を CLI に
+追加する。引き続き remote install / Python plugin / backend plugin /
+replay 実装には進まない。
+
+### 新規 MCP ツール: **ゼロ** (Stable 43 / Experimental 7 / 合計 50 不変)
+
+v1.4 も MCP surface を増やさない。新機能は **CLI 専用**。
+extension integrity check は管理操作で、実験中の AI エージェントが頻繁に
+呼ぶものではないため、CLI 側に閉じている。
+
+### 新規 CLI subcommands
+
+```bash
+visa-mcp extension check [<extension_id>] [--strict] [--json]
+visa-mcp extension inspect <extension_id> [--json]
+visa-mcp extension uninstall <extension_id> --dry-run [--json]
+visa-mcp registry overlay [--source builtin|extension] [--json]
+visa-mcp validate extension <path> --strict
+```
+
+### 新規 module
+
+**`src/visa_mcp/extension_integrity.py`**:
+
+- `check_installed_extension(extension_id, *, strict=False, ...)`:
+  sha256 drift / missing / extra / extension.yaml 再 validate
+- `check_all_installed_extensions(*, strict=False, ...)`
+- `inspect_installed_extension(extension_id, ...)`:
+  metadata + contents summary + registry_entry_ids
+- `uninstall_dry_run(extension_id, ...)`:
+  削除予定 path / file 数 / overlay id を返す
+
+### integrity 値
+
+| 値 | 意味 |
+|----|------|
+| `ok` | 全 checksum 一致 |
+| `modified` | install 後に file 変更あり |
+| `missing_file` | 記録 file が消えている |
+| `extra_file` | metadata 外の file が増えている (warning) |
+| `invalid` | `.install_meta.json` 無し / re-validate 失敗 |
+
+### strict mode
+
+`validate extension --strict` で以下を error 化:
+
+- `empty_contents` warning → `strict_empty_contents` error
+- `registry_entries_format` warning → `strict_registry_entries_format` error
+- 参照 instrument の `support_level=draft` → `strict_support_level_draft`
+- `support_level=verified` で `validation_evidence` 空 →
+  `strict_verified_requires_evidence`
+
+`extension check --strict` でも warning (`extension_extra_file` 等) を
+error に格上げ。
+
+### 新規 schema field (任意)
+
+**`metadata.validation_evidence`** (instrument YAML、`dict[str, Any]`):
+
+- `support_level=verified` の実質的根拠を構造化
+- 例: `tested_by`, `tested_at`, `interface`, `firmware`, `tested_items`, `notes`
+- v1.4 では schema レベルで subkey 検証しない (freeform)
+- strict mode で空のとき error
+
+### 新規 docs
+
+- **`docs/extension_integrity.md`**: integrity 検査 / strict mode /
+  validation_evidence 仕様
+- 関連 docs (extension_install / extension_registry_overlay / etc.)
+  からの cross link を更新
+
+### 新規 error_class / warning_class
+
+新規 error_class:
+- `extension_install_path_missing`
+- `extension_install_meta_missing`
+- `extension_manifest_missing`
+- `extension_checksum_mismatch`
+- `extension_checksum_unreadable`
+- `extension_file_missing`
+- `strict_empty_contents`
+- `strict_registry_entries_format`
+- `strict_support_level_draft`
+- `strict_verified_requires_evidence`
+
+新規 warning_class:
+- `extension_extra_file`
+
+### 互換性
+
+- 既存 install 済み pack (v1.3.x) はそのまま `extension check` 可能
+  (lockfile / `.install_meta.json` 形式は変更なし)
+- `validate_extension_file` の signature に `strict` が optional keyword
+  として追加された (default False、既存呼び出しは無変更で動く)
+- `MetadataConfig.validation_evidence` が optional field として追加
+  (default `{}`、既存 instrument YAML は無変更で動く)
+- Stable 43 / Experimental 7 / 合計 50 不変
+
+---
+
 ## v1.3.1 — v1.3.0 レビュー応答 (atomic install / overlay validation / docs 整合)
 
 合言葉: **「force install でも既存喪失しない / overlay registry を入口で守る」**

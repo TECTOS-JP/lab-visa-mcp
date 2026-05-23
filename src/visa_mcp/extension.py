@@ -124,8 +124,18 @@ class ExtensionValidationReport:
 
 def validate_extension_file(
     path: str | Path,
+    *,
+    strict: bool = False,
 ) -> ExtensionValidationReport:
-    """`extension.yaml` を読み、manifest + 参照ファイル群を検証する。"""
+    """`extension.yaml` を読み、manifest + 参照ファイル群を検証する。
+
+    v1.4: `strict=True` で normal 時の warning を error に格上げする
+    (registry 掲載 / CI / release 前検査向け)。具体的には:
+      - `empty_contents` warning → error
+      - `registry_entries_format` warning → error
+      - 参照 instrument 内の `support_level=draft` を error
+      - support_level=verified なのに validation_evidence 無し → error
+    """
     rep = ExtensionValidationReport(file=str(path))
     p = Path(path)
     if not p.exists():
@@ -322,6 +332,59 @@ def validate_extension_file(
             })
 
     rep.files_checked = files_checked
+
+    # v1.4: strict mode promotion
+    if strict:
+        # empty_contents / registry_entries_format warning → error
+        promote_classes = {"empty_contents", "registry_entries_format"}
+        remaining_warnings: list[dict[str, Any]] = []
+        for w in rep.warnings:
+            if w.get("warning_class") in promote_classes:
+                rep.errors.append({
+                    "error_class": "strict_" + w["warning_class"],
+                    "message": "(strict) " + str(w.get("message", "")),
+                    "field_path": w.get("field_path", ""),
+                })
+            else:
+                remaining_warnings.append(w)
+        rep.warnings = remaining_warnings
+
+        # instruments 参照: support_level=draft を strict で error 化、
+        # support_level=verified なのに validation_evidence 無しを strict で error 化
+        base = p.parent
+        for rel in manifest.contents.instruments:
+            full = base / rel
+            if not full.exists():
+                continue
+            try:
+                idata = yaml.safe_load(full.read_text(encoding="utf-8")) or {}
+            except Exception:
+                continue
+            md = (idata.get("metadata") or {})
+            sl = md.get("support_level", "")
+            if sl == "draft":
+                rep.errors.append({
+                    "error_class": "strict_support_level_draft",
+                    "message": (
+                        f"(strict) instrument {rel!r} の "
+                        f"metadata.support_level=draft は registry 掲載品質"
+                        "ではありません"
+                    ),
+                    "field_path": "metadata.support_level",
+                })
+            if sl == "verified":
+                ev = md.get("validation_evidence") or {}
+                if not ev:
+                    rep.errors.append({
+                        "error_class": "strict_verified_requires_evidence",
+                        "message": (
+                            f"(strict) instrument {rel!r} は "
+                            "support_level=verified だが "
+                            "metadata.validation_evidence が空"
+                        ),
+                        "field_path": "metadata.validation_evidence",
+                    })
+
     if rep.errors:
         rep.status = "error"
     elif rep.warnings:

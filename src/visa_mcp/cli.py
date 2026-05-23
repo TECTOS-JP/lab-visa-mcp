@@ -1,5 +1,5 @@
 """
-v1.3: visa-mcp CLI
+v1.4: visa-mcp CLI
 
 Usage:
   visa-mcp validate instrument <path>
@@ -8,11 +8,14 @@ Usage:
   visa-mcp validate benchmark <path>
   visa-mcp validate registry <path>
   visa-mcp validate schemas
-  visa-mcp validate extension <path-to-extension.yaml>     # v1.2
+  visa-mcp validate extension <path-to-extension.yaml> [--strict]   # v1.2 / strict v1.4
   visa-mcp extension install <path-to-extension.yaml>      # v1.3
   visa-mcp extension list [--json]                         # v1.3
-  visa-mcp extension uninstall <extension_id>              # v1.3
+  visa-mcp extension uninstall <extension_id> [--dry-run]  # v1.3 / dry-run v1.4
   visa-mcp extension validate-installed [--json]           # v1.3
+  visa-mcp extension check [<extension_id>] [--strict]     # v1.4
+  visa-mcp extension inspect <extension_id> [--json]       # v1.4
+  visa-mcp registry overlay [--source builtin|extension]   # v1.4
   visa-mcp serve
 
 各 subcommand は --json で機械可読出力を返す (CI / 自動化向け)。
@@ -82,8 +85,10 @@ def cmd_validate(args: argparse.Namespace) -> int:
         return _emit(reps, args.json)
     if target == "extension":
         # v1.2: extension manifest (definition pack) validation
+        # v1.4: --strict 対応
         from visa_mcp.extension import validate_extension_file
-        rep = validate_extension_file(path).to_dict()
+        strict = bool(getattr(args, "strict", False))
+        rep = validate_extension_file(path, strict=strict).to_dict()
         return _emit([rep], args.json)
     if target == "schemas":
         # schemas/*.schema.json がすべて pretty-printed + preview metadata を
@@ -158,6 +163,10 @@ def build_parser() -> argparse.ArgumentParser:
     val.add_argument(
         "--json", action="store_true", help="JSON 出力 (CI 向け)",
     )
+    val.add_argument(
+        "--strict", action="store_true",
+        help="(v1.4) strict mode: warning を error 化 (registry 掲載検査向け)",
+    )
     val.set_defaults(func=cmd_validate)
 
     serve = sub.add_parser("serve", help="MCP server を起動 (default)")
@@ -189,6 +198,10 @@ def build_parser() -> argparse.ArgumentParser:
     ext_un = ext_sub.add_parser("uninstall", help="extension を取り除く")
     ext_un.add_argument("extension_id", help="extension_id を指定")
     ext_un.add_argument("--json", action="store_true")
+    ext_un.add_argument(
+        "--dry-run", action="store_true",
+        help="(v1.4) 削除せず、削除対象の path / overlay id を表示",
+    )
     ext_un.set_defaults(func=cmd_extension)
 
     ext_val = ext_sub.add_parser(
@@ -197,6 +210,48 @@ def build_parser() -> argparse.ArgumentParser:
     )
     ext_val.add_argument("--json", action="store_true")
     ext_val.set_defaults(func=cmd_extension)
+
+    # v1.4: integrity check
+    ext_chk = ext_sub.add_parser(
+        "check",
+        help="(v1.4) installed extension の integrity (sha256 drift) を検査",
+    )
+    ext_chk.add_argument(
+        "extension_id", nargs="?",
+        help="特定 extension のみ。省略時は全 installed を検査",
+    )
+    ext_chk.add_argument(
+        "--strict", action="store_true",
+        help="warning を error に格上げ",
+    )
+    ext_chk.add_argument("--json", action="store_true")
+    ext_chk.set_defaults(func=cmd_extension)
+
+    # v1.4: inspect
+    ext_ins = ext_sub.add_parser(
+        "inspect",
+        help="(v1.4) installed extension の詳細を表示",
+    )
+    ext_ins.add_argument("extension_id")
+    ext_ins.add_argument("--json", action="store_true")
+    ext_ins.set_defaults(func=cmd_extension)
+
+    # v1.4: registry overlay
+    reg = sub.add_parser(
+        "registry",
+        help="(v1.4) registry の表示 / overlay 検査",
+    )
+    reg_sub = reg.add_subparsers(dest="reg_command", required=True)
+    reg_ov = reg_sub.add_parser(
+        "overlay",
+        help="built-in + installed extension の overlay registry を表示",
+    )
+    reg_ov.add_argument(
+        "--source", choices=["builtin", "extension"], default=None,
+        help="表示を一方の source に絞る",
+    )
+    reg_ov.add_argument("--json", action="store_true")
+    reg_ov.set_defaults(func=cmd_registry)
 
     return parser
 
@@ -248,6 +303,27 @@ def cmd_extension(args: argparse.Namespace) -> int:
         return 0
 
     if sub == "uninstall":
+        if getattr(args, "dry_run", False):
+            from visa_mcp.extension_integrity import uninstall_dry_run
+            data = uninstall_dry_run(args.extension_id)
+            if args.json:
+                print(json.dumps({"reports": [data]},
+                                  ensure_ascii=False, indent=2, default=str))
+            else:
+                if data.get("status") == "error":
+                    for e in data.get("errors", []):
+                        print(f"[ERR]  {e.get('error_class')}: "
+                              f"{e.get('message')}")
+                    return 1
+                print(f"[DRY]  uninstall {data['extension_id']}")
+                print(f"  would remove path : {data['would_remove_path']}")
+                print(f"  file count        : "
+                      f"{data['would_remove_file_count']}")
+                if data["would_remove_overlay_ids"]:
+                    print(f"  overlay ids       : "
+                          f"{data['would_remove_overlay_ids']}")
+            return 0 if data.get("status") != "error" else 1
+
         res = uninstall_definition_pack(args.extension_id)
         return _emit_extension({
             "status": res.get("status", "error"),
@@ -281,7 +357,104 @@ def cmd_extension(args: argparse.Namespace) -> int:
                       f"{w.get('message')}")
         return 0 if rep.status != "error" else 1
 
+    if sub == "check":
+        from visa_mcp.extension_integrity import (
+            check_installed_extension, check_all_installed_extensions,
+        )
+        strict = bool(getattr(args, "strict", False))
+        if args.extension_id:
+            reps = [check_installed_extension(args.extension_id,
+                                              strict=strict)]
+        else:
+            reps = check_all_installed_extensions(strict=strict)
+        reports = [r.to_dict() for r in reps]
+        if args.json:
+            print(json.dumps({"reports": reports},
+                              ensure_ascii=False, indent=2, default=str))
+        else:
+            if not reports:
+                print("(no installed extensions)")
+            for r in reports:
+                icon = {"ok": "[OK]", "warning": "[WARN]",
+                        "error": "[ERR]"}.get(r["status"], "[?]")
+                print(f"{icon} {r['extension_id']} v{r['version']}  "
+                      f"integrity={r['integrity']}  "
+                      f"files={r['files_checked']}")
+                for e in r["errors"]:
+                    print(f"  ERROR  {e.get('error_class')}: "
+                          f"{e.get('message')}")
+                for w in r["warnings"]:
+                    print(f"  WARN   {w.get('warning_class')}: "
+                          f"{w.get('message')}")
+                for a in r["recommended_actions"]:
+                    print(f"  fix?   {a['action']}: {a['command']}")
+        return 0 if all(r["status"] != "error" for r in reports) else 1
+
+    if sub == "inspect":
+        from visa_mcp.extension_integrity import inspect_installed_extension
+        rep = inspect_installed_extension(args.extension_id).to_dict()
+        if args.json:
+            print(json.dumps({"report": rep},
+                              ensure_ascii=False, indent=2, default=str))
+        else:
+            print(f"extension_id   : {rep['extension_id']}")
+            print(f"version        : {rep['version']}")
+            print(f"installed_at   : {rep['installed_at']}")
+            print(f"source_path    : {rep['source_path']}")
+            print(f"visa_mcp_ver   : {rep['visa_mcp_version']}")
+            print(f"install_path   : {rep['install_path']}")
+            print(f"integrity      : {rep['integrity']}")
+            print(f"contents       : {rep['contents_summary']}")
+            if rep["registry_entry_ids"]:
+                print(f"registry ids   : {rep['registry_entry_ids']}")
+            for w in rep["warnings"]:
+                print(f"  WARN  {w.get('warning_class')}: "
+                      f"{w.get('message')}")
+        return 0 if rep["integrity"] != "invalid" else 1
+
     print(f"unknown extension sub-command: {sub}", file=sys.stderr)
+    return 2
+
+
+def cmd_registry(args: argparse.Namespace) -> int:
+    """v1.4: registry overlay 表示"""
+    from visa_mcp.extension_install import load_overlay_registry
+    if args.reg_command == "overlay":
+        builtin = (Path(__file__).parent.parent.parent / "registry"
+                   / "INDEX.yaml")
+        rep = load_overlay_registry(builtin if builtin.exists() else None)
+        data = rep.to_dict()
+        if args.source:
+            data["entries"] = [
+                e for e in data["entries"]
+                if (e.get("source") or {}).get("kind") == args.source
+            ]
+        if args.json:
+            print(json.dumps(data, ensure_ascii=False, indent=2,
+                              default=str))
+        else:
+            icon = {"ok": "[OK]", "warning": "[WARN]",
+                    "error": "[ERR]"}.get(data["status"], "[?]")
+            print(f"{icon} overlay registry  status={data['status']}  "
+                  f"entries={len(data['entries'])}  "
+                  f"builtin={data['builtin_count']}  "
+                  f"extension={data['extension_count']}")
+            for e in data["entries"]:
+                src = e.get("source") or {}
+                if src.get("kind") == "extension":
+                    src_str = (f"extension({src.get('extension_id')}@"
+                                f"{src.get('extension_version')})")
+                else:
+                    src_str = "builtin"
+                print(f"  {e['id']:30s} {e.get('vendor', ''):15s} "
+                      f"{e.get('model', ''):15s} {src_str}")
+            for er in data["errors"]:
+                print(f"  ERROR  {er.get('error_class')}: "
+                      f"{er.get('message')}")
+        return 0 if data["status"] != "error" else 1
+
+    print(f"unknown registry sub-command: {args.reg_command}",
+          file=sys.stderr)
     return 2
 
 

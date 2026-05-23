@@ -111,6 +111,17 @@ class MetadataConfig(BaseModel):
     tested_interfaces: list[str] = Field(default_factory=list)  # ["USB", "LAN", "GPIB"]
     tested_firmware: str = ""
     definition_version: str = ""           # 機器定義 YAML 自体の改訂番号 (任意)
+    # v1.4: support_level=verified の実質的な根拠 (任意)。strict mode で
+    # support_level=verified にもかかわらず未指定なら warning となる。
+    # 例:
+    #   validation_evidence:
+    #     tested_by: "TECTOS"
+    #     tested_at: "2026-05-23"
+    #     interface: "USB"
+    #     firmware: "1.23"
+    #     tested_items: [identify, set_voltage, query_voltage, verify, safe_shutdown]
+    #     notes: "Basic voltage output and readback tested."
+    validation_evidence: dict[str, Any] = Field(default_factory=dict)
 
 
 # ===== 安全制約 (v0.2.0) =====
