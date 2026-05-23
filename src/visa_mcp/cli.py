@@ -1,5 +1,5 @@
 """
-v0.9.2: visa-mcp CLI (validate subcommands)
+v1.3: visa-mcp CLI
 
 Usage:
   visa-mcp validate instrument <path>
@@ -8,6 +8,12 @@ Usage:
   visa-mcp validate benchmark <path>
   visa-mcp validate registry <path>
   visa-mcp validate schemas
+  visa-mcp validate extension <path-to-extension.yaml>     # v1.2
+  visa-mcp extension install <path-to-extension.yaml>      # v1.3
+  visa-mcp extension list [--json]                         # v1.3
+  visa-mcp extension uninstall <extension_id>              # v1.3
+  visa-mcp extension validate-installed [--json]           # v1.3
+  visa-mcp serve
 
 各 subcommand は --json で機械可読出力を返す (CI / 自動化向け)。
 """

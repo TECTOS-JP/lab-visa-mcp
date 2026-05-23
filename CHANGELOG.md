@@ -1,5 +1,66 @@
 # 変更履歴
 
+## v1.3.1 — v1.3.0 レビュー応答 (atomic install / overlay validation / docs 整合)
+
+合言葉: **「force install でも既存喪失しない / overlay registry を入口で守る」**
+
+v1.3.0 の external review (P0/P1/P2) を反映した patch release。
+新規 MCP ツールゼロ、CLI 引数の互換変更なし。
+
+### 変更点
+
+- **P0**: 新規・変更 file の LF / multi-line を v1.3.1 でも parametrized
+  test で確認 (`tests/test_v131_review.py`)。
+- **P1-2** (`extension_install.py`):
+  force install の置換を `rmtree + replace` から **backup-rename** へ
+  変更。失敗時に backup を復元するので、既存 install を喪失しなくなった。
+- **P1-3** (`extension_install.py::load_overlay_registry`):
+  `registry_entries[*].path` が pack 外を指す場合は error
+  (`registry_entry_path_outside_pack`)。
+- **P1-4** (`extension_install.py::load_overlay_registry`):
+  registry entry の `id` / `path` 不足を error
+  (`registry_entry_missing_id` / `registry_entry_missing_path`)、
+  `vendor` / `model` / `category` / `support_level` 不足を warning。
+- **P1-5** (`cli.py`):
+  module docstring を `v0.9.2:` から **v1.3** 内容 (extension
+  install/list/uninstall/validate-installed + serve) へ更新。
+- **P1-6** (`extension_install.py` + `docs/extension_install.md`):
+  staging copy が pack directory 内の **全 file** を copy する旨を
+  docs に明記。同時に `.git/`, `__pycache__/`, `.mypy_cache/`,
+  `.pytest_cache/`, `.idea/`, `.vscode/`, `node_modules/`,
+  `.DS_Store`, `Thumbs.db`, `*.pyc`, `*.pyo`, `*.tmp`, `*.swp`
+  を **除外** (誤公開・サイズ膨張を予防)。
+- **P1-7** (`extension_install.py`):
+  install 元 path が `extensions_dir` 配下にある場合は拒否
+  (`extension_source_inside_extensions_dir`)。force 時に source 自身を
+  消す事故を防ぐ。
+- **P2-8/9** (`docs/extension_install.md`):
+  v1.4+ 候補として `--builtin-registry` 引数と `source_path` 相対化を
+  明記。
+
+### 新規 error sub_class
+
+- `extension_source_inside_extensions_dir`
+- `registry_entry_path_outside_pack`
+- `registry_entry_missing_id`
+- `registry_entry_missing_path`
+
+### 新規 warning_class
+
+- `registry_entry_missing_vendor`
+- `registry_entry_missing_model`
+- `registry_entry_missing_category`
+- `registry_entry_missing_support_level`
+
+### 互換性
+
+- 既存 v1.3.0 で install 済みの `.install_meta.json` / lockfile は
+  読み取り互換 (schema 変更なし)。
+- 既存 v1.3.0 の CLI 引数・出力は変更なし。
+- Stable 43 / Experimental 7 / 合計 50 不変。
+
+---
+
 ## v1.3.0 — Local Definition Pack Management (no executable code, no remote)
 
 合言葉: **「definition pack を『作れる』から『安全に導入できる』へ」**

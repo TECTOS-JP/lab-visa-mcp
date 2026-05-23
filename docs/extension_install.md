@@ -42,15 +42,38 @@ visa-mcp extension validate-installed [--json]
 ## install フロー
 
 1. `extension.yaml` を read
-2. `validate_extension_file` (path 安全性 + sub-files 検証) を必ず通す
-3. 既存 `extension_id` を lockfile から確認
+2. install 元 path が `extensions_dir` (例: `~/.visa-mcp/extensions/`)
+   配下にある場合は拒否 (`extension_source_inside_extensions_dir`)
+3. `validate_extension_file` (path 安全性 + sub-files 検証) を必ず通す
+4. 既存 `extension_id` を lockfile から確認
    - 同 id があり `--force` 指定なし → `extension_duplicate_install` error
-4. pack 内 file を temp directory に staged copy
-5. install path に **atomic rename** (途中失敗で中途半端な状態を残さない)
-6. `.install_meta.json` に **sha256 checksums** + manifest を保存
-7. lockfile (`extensions.lock.json`) を更新 (既存 entry を置換)
+5. pack directory 内 file を temp directory に **staged copy**
+   (詳細は次節 — 全ファイル対象だが除外ルールあり)
+6. install path への切り替え (**v1.3.1 backup-rename**):
+   1. 既存 `install_path` を `install_path.bak-<UTC ts>` へ rename
+   2. tmpdir を `install_path` へ rename
+   3. 成功時 backup を削除
+   4. 失敗時 backup を `install_path` へ戻す
+7. `.install_meta.json` に **sha256 checksums** + manifest を保存
+8. lockfile (`extensions.lock.json`) を更新 (既存 entry を置換)
 
-エラー時は temp directory を clean up し、install path は変更されない。
+エラー時は temp directory を clean up し、install path は変更されない
+(force で既存があった場合は backup から復元される)。
+
+### staged copy の対象
+
+`extension.yaml` が置かれた directory 内の **全ファイル** が再帰コピー
+される (manifest の `contents.*` で参照されていない補助 file も含む)。
+ただし以下は v1.3.1 から **除外**:
+
+| 種別 | 例 |
+|------|-----|
+| directory | `.git/` `__pycache__/` `.mypy_cache/` `.pytest_cache/` `.idea/` `.vscode/` `node_modules/` |
+| ファイル名 | `.DS_Store` `Thumbs.db` |
+| 拡張子 | `*.pyc` `*.pyo` `*.tmp` `*.swp` |
+
+これらは definition pack の動作に不要で、サイズ膨張・誤公開
+(SCM metadata) の原因になりやすいため install には持ち込まない。
 
 ## duplicate / version conflict
 
@@ -129,6 +152,9 @@ v1.3 の install で **行われる**:
 - plugin entry_points discovery
 - remote registry
 - Python code 実行
+- `visa-mcp extension validate-installed --builtin-registry <path>`
+  (現状は repo 内 `registry/INDEX.yaml` を default として利用)
+- `.install_meta.json` `source_path` の相対化 / 表示制御 (privacy)
 
 ## 関連 docs
 

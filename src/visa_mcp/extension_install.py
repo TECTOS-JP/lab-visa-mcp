@@ -1,5 +1,5 @@
 """
-v1.3.0: Local Definition Pack management (install / list / uninstall + overlay)
+v1.3: Local Definition Pack management (install / list / uninstall + overlay)
 
 合言葉: 「**definition pack を「作れる」から「安全に導入できる」へ**」
 
@@ -9,6 +9,13 @@ v1.3.0: Local Definition Pack management (install / list / uninstall + overlay)
 - lockfile: `~/.visa-mcp/extensions.lock.json`
 - 整合性: 各 file の sha256 を metadata に保存
 - duplicate: 同 id + 同 version は `--force` 必須
+
+v1.3.1 強化点:
+- force install を backup-rename 方式へ (既存喪失防止)
+- staging copy で `.git/` `__pycache__/` `*.pyc` `.DS_Store` `*.tmp` を除外
+- install source が extensions_dir 配下の場合は拒否
+- overlay registry の registry_entries path traversal を拒否
+- overlay registry entry の必須項目 (id/path) 不足を error 化
 
 詳細仕様: `docs/extension_install.md`, `docs/extension_registry_overlay.md`
 """
@@ -50,6 +57,45 @@ def default_lockfile_path() -> Path:
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def _now_stamp() -> str:
+    """backup directory 名用の compact timestamp (UTC、コロン無し)"""
+    return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+
+# v1.3.1 P1-6: staging copy 除外ルール
+_EXCLUDE_DIR_NAMES = {".git", "__pycache__", ".mypy_cache", ".pytest_cache",
+                      ".idea", ".vscode", "node_modules"}
+_EXCLUDE_FILE_SUFFIXES = {".pyc", ".pyo", ".tmp", ".swp"}
+_EXCLUDE_FILE_NAMES = {".DS_Store", "Thumbs.db"}
+
+
+def _should_exclude_path(rel: Path) -> bool:
+    """staging copy 時に除外すべき相対 path か"""
+    parts = rel.parts
+    if any(part in _EXCLUDE_DIR_NAMES for part in parts):
+        return True
+    name = rel.name
+    if name in _EXCLUDE_FILE_NAMES:
+        return True
+    if rel.suffix in _EXCLUDE_FILE_SUFFIXES:
+        return True
+    return False
+
+
+def _is_path_inside(child: Path, parent: Path) -> bool:
+    """child が parent 配下に収まるかを resolve 後で判定"""
+    try:
+        cp = child.resolve()
+        pp = parent.resolve()
+    except (OSError, RuntimeError):
+        return False
+    try:
+        cp.relative_to(pp)
+        return True
+    except ValueError:
+        return False
 
 
 def _read_lockfile(path: Path) -> dict[str, Any]:
@@ -129,6 +175,28 @@ def install_definition_pack(
         })
         return result
 
+    # v1.3.1 P1-7: install 元が extensions_dir 配下にある場合は拒否
+    # (force 時に source を自分で消す事故を防ぐ)
+    try:
+        src_resolved = src.resolve()
+        ext_dir_resolved = extensions_dir.resolve()
+        if ext_dir_resolved in src_resolved.parents:
+            result.errors.append({
+                "error_class": "validation",
+                "message": (
+                    f"install source path is inside extensions_dir "
+                    f"({ext_dir_resolved}); refusing to re-install from "
+                    f"managed location"
+                ),
+                "details": {
+                    "sub_class": "extension_source_inside_extensions_dir",
+                },
+            })
+            return result
+    except (OSError, RuntimeError):
+        # resolve に失敗するケース (壊れた symlink 等) は後段で拾う
+        pass
+
     # 1+4. validate_extension_file (pack 全体 + path 安全)
     val_rep = validate_extension_file(src)
     if val_rep.errors:
@@ -173,29 +241,53 @@ def install_definition_pack(
         })
         return result
 
-    # 3. staging copy (pack 内全ファイルを tmp にコピー)
+    # 3. staging copy (pack 内 file を tmp に copy、除外ルール適用)
     pack_src_dir = src.parent
     install_path = extensions_dir / ext_id
     extensions_dir.mkdir(parents=True, exist_ok=True)
     tmpdir = Path(tempfile.mkdtemp(
         prefix=f"visa-mcp-ext-{ext_id}-", dir=str(extensions_dir),
     ))
+    backup_path: Path | None = None
     try:
-        # pack 内 file をすべて copy (再帰)
+        # pack 内 file をすべて copy (再帰)、ただし以下は除外
         for src_path in pack_src_dir.rglob("*"):
-            if src_path.is_file():
-                rel = src_path.relative_to(pack_src_dir)
-                dst = tmpdir / rel
-                dst.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(src_path, dst)
+            if not src_path.is_file():
+                continue
+            rel = src_path.relative_to(pack_src_dir)
+            if _should_exclude_path(rel):
+                continue
+            dst = tmpdir / rel
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src_path, dst)
 
-        # 5. atomic rename
+        # 5. backup-rename 方式 (v1.3.1 P1-2)
+        #   - 既存 install_path を backup_path へ rename
+        #   - tmpdir を install_path へ rename
+        #   - 成功時 backup_path を削除
+        #   - 失敗時 backup_path を install_path へ戻す
         if install_path.exists():
-            # force 上書き: 既存削除
-            shutil.rmtree(install_path)
+            backup_path = install_path.with_name(
+                install_path.name + ".bak-" + _now_stamp(),
+            )
+            install_path.rename(backup_path)
         tmpdir.replace(install_path)
+        if backup_path is not None and backup_path.exists():
+            shutil.rmtree(backup_path, ignore_errors=True)
+            backup_path = None
     except Exception as e:
+        # rollback
         shutil.rmtree(tmpdir, ignore_errors=True)
+        if backup_path is not None and backup_path.exists():
+            try:
+                if install_path.exists():
+                    shutil.rmtree(install_path, ignore_errors=True)
+                backup_path.rename(install_path)
+            except Exception as rb_err:
+                logger.error(
+                    "rollback from backup failed: %s (backup=%s)",
+                    rb_err, backup_path,
+                )
         result.errors.append({
             "error_class": "internal",
             "message": f"staging copy failed: {e}",
@@ -416,18 +508,94 @@ def load_overlay_registry(
             except Exception:
                 continue
             for item in edata.get("instruments") or []:
+                source = {
+                    "kind": "extension",
+                    "extension_id": ext_id,
+                    "extension_version": ext_ver,
+                }
+                item_id = item.get("id", "")
+                item_path_raw = item.get("path", "")
+                item_vendor = item.get("vendor", "")
+                item_model = item.get("model", "")
+                item_category = item.get("category", "")
+                item_support = item.get("support_level", "")
+
+                # v1.3.1 P1-4: 必須項目 (id / path) 不足を error 化
+                if not item_id:
+                    rep.errors.append({
+                        "error_class": "validation",
+                        "message": (
+                            f"registry entry に id が無い "
+                            f"(extension={ext_id}, file={rel})"
+                        ),
+                        "details": {
+                            "sub_class": "registry_entry_missing_id",
+                            "source": source,
+                            "registry_entries_file": rel,
+                        },
+                    })
+                    continue
+                if not item_path_raw:
+                    rep.errors.append({
+                        "error_class": "validation",
+                        "message": (
+                            f"registry entry id={item_id!r} に path が無い "
+                            f"(extension={ext_id})"
+                        ),
+                        "details": {
+                            "sub_class": "registry_entry_missing_path",
+                            "id": item_id,
+                            "source": source,
+                        },
+                    })
+                    continue
+
+                # 補足: vendor / model / category / support_level の欠落は
+                # warning (description 用途、衝突検出には不要)
+                for field_name, val, w_class in (
+                    ("vendor", item_vendor, "registry_entry_missing_vendor"),
+                    ("model", item_model, "registry_entry_missing_model"),
+                    ("category", item_category,
+                     "registry_entry_missing_category"),
+                    ("support_level", item_support,
+                     "registry_entry_missing_support_level"),
+                ):
+                    if not val:
+                        rep.warnings.append({
+                            "warning_class": w_class,
+                            "message": (
+                                f"registry entry id={item_id!r}: "
+                                f"{field_name} が空"
+                            ),
+                            "details": {"id": item_id, "source": source},
+                        })
+
+                # v1.3.1 P1-3: registry entry path が pack 外を指す場合は error
+                resolved_entry = (pack_path / item_path_raw).resolve()
+                if not _is_path_inside(resolved_entry, pack_path):
+                    rep.errors.append({
+                        "error_class": "validation",
+                        "message": (
+                            f"registry entry id={item_id!r} の path "
+                            f"{item_path_raw!r} が pack ({ext_id}) 外を指している"
+                        ),
+                        "details": {
+                            "sub_class": "registry_entry_path_outside_pack",
+                            "id": item_id,
+                            "path": item_path_raw,
+                            "source": source,
+                        },
+                    })
+                    continue
+
                 rep.entries.append(OverlayEntry(
-                    id=item.get("id", ""),
-                    vendor=item.get("vendor", ""),
-                    model=item.get("model", ""),
-                    category=item.get("category", ""),
-                    support_level=item.get("support_level", ""),
-                    path=str((pack_path / item.get("path", "")).resolve()),
-                    source={
-                        "kind": "extension",
-                        "extension_id": ext_id,
-                        "extension_version": ext_ver,
-                    },
+                    id=item_id,
+                    vendor=item_vendor,
+                    model=item_model,
+                    category=item_category,
+                    support_level=item_support,
+                    path=str(resolved_entry),
+                    source=source,
                 ))
 
     # duplicate id 検出
