@@ -307,6 +307,29 @@ def init_extension_pack(
         })
         return res
 
+    # v1.7.1 P1: --force は既存 directory への上書きを許すが、
+    # 既存 file (template が生成しない補助 file 等) は **残す**。
+    # 完全クリーンが必要な場合は手動で rmtree してから init すること。
+    if pack_path.exists() and force:
+        retained = [
+            str(p.relative_to(pack_path)).replace("\\", "/")
+            for p in pack_path.rglob("*") if p.is_file()
+        ]
+        if retained:
+            res.warnings.append({
+                "warning_class": "extension_init_force_retains_files",
+                "message": (
+                    f"--force は既存 file ({len(retained)} 件) を残し、"
+                    "template が生成する file のみ上書きする。完全クリーン"
+                    "が必要なら手動で directory を削除してから init して"
+                    "ください"
+                ),
+                "details": {
+                    "retained_files_count": len(retained),
+                    "retained_files_sample": retained[:10],
+                },
+            })
+
     pack_path.mkdir(parents=True, exist_ok=True)
 
     yaml_tmpl = {

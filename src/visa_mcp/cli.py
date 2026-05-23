@@ -809,14 +809,46 @@ def cmd_extension(args: argparse.Namespace) -> int:
                   f"ready_to_package={s['ready_to_package']}  "
                   f"ready_for_registry_review="
                   f"{s['ready_for_registry_review']}")
-            for e in data["errors"]:
-                print(f"  ERROR  [{e.get('stage')}] "
-                      f"{e.get('error_class')}: {e.get('message')}")
-            for w in data["warnings"]:
-                print(f"  WARN   [{w.get('stage')}] "
-                      f"{w.get('warning_class')}: {w.get('message')}")
-            for a in data["recommended_actions"]:
-                print(f"  fix?   {a['action']}: {a['reason']}")
+            # v1.7.1 P1: 3 グループに分類表示
+            #   Errors / Warnings (品質) / Strict-only issues
+            #   (--strict が無い場合の strict_would_fail を抜き出す)
+            print("  Errors (block package):")
+            if data["errors"]:
+                for e in data["errors"]:
+                    print(f"    ERROR  [{e.get('stage')}] "
+                          f"{e.get('error_class')}: "
+                          f"{e.get('message')}")
+            else:
+                print("    (none)")
+            strict_warns = [
+                w for w in data["warnings"]
+                if w.get("warning_class") == "strict_would_fail"
+            ]
+            normal_warns = [
+                w for w in data["warnings"]
+                if w.get("warning_class") != "strict_would_fail"
+            ]
+            print("  Warnings (quality):")
+            if normal_warns:
+                for w in normal_warns:
+                    print(f"    WARN   [{w.get('stage')}] "
+                          f"{w.get('warning_class')}: "
+                          f"{w.get('message')}")
+            else:
+                print("    (none)")
+            print("  Strict-only issues (must fix before "
+                  "registry / publishing):")
+            if strict_warns:
+                for w in strict_warns:
+                    inner = w.get("error_class", "")
+                    print(f"    STRICT [{w.get('stage')}] "
+                          f"{inner}: {w.get('message')}")
+            else:
+                print("    (none)")
+            if data["recommended_actions"]:
+                print("  Recommended actions:")
+                for a in data["recommended_actions"]:
+                    print(f"    fix?   {a['action']}: {a['reason']}")
         return 0 if data["status"] != "error" else 1
 
     print(f"unknown extension sub-command: {sub}", file=sys.stderr)

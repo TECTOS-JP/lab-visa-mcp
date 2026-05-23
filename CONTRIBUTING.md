@@ -78,13 +78,42 @@ strict gate を通すための最低ラインです。
   追加は OK、既存の意味変更は NG。
 - raw VISA 操作は v1.0 から `VISA_MCP_ALLOW_RAW=1` 環境変数 gate。
 
-## 5. CoC
+## 5. CoC / データ取り扱いポリシー
 
-- 機材 / 安全への配慮: 「実機未検証」は明示する。`support_level: draft`
-  / `safety_notes` をきちんと書く。
-- LLM 生成 instrument YAML は `support_level: draft` で出すこと
-  (validation_evidence が無いので)。
-- 機器メーカー manual の引用は出典を明示。
+### 機材 / 安全
+
+- 「実機未検証」は明示する。`support_level: draft` / `safety_notes` を
+  きちんと書く。実機で高電圧 / 高電流 / 化学薬品が関わる場合は
+  `catalog.safety_notes` に **必須** で記述する。
+- LLM 生成 instrument YAML は **`support_level: draft`** で出すこと
+  (validation_evidence が無いので)。`tested` / `verified` への昇格は
+  実機検証の証拠が必要。
+
+### 計測器マニュアル / SCPI 表 / proprietary 情報
+
+- 機器メーカー manual / datasheet の **転記** は出典 (型番 / リビジョン /
+  page) を `instrument.yaml` の `metadata.manual_ref` または PR description
+  に明示する。
+- メーカーが NDA / 非公開とする SCPI 拡張、internal command、
+  service mode 等は **公開 PR に含めない**。private fork で管理。
+- 製品 firmware 内部のバグ workaround を含む場合は、`safety_notes` に
+  「特定 firmware version でのみ動作」と明示。
+
+### 認証情報 / raw data
+
+- instrument YAML / extension.yaml に **API key / password / IP /
+  MAC / Serial 等の個人 / 拠点固有情報を含めない**。テンプレート化して
+  `_system.yaml` 側で解決する設計を維持する。
+- benchmark task / experiment plan / bundle に実測 raw data を含める
+  場合は、被験者識別子 / 内部 project code 等を除去する。
+
+### LLM-generated content
+
+- `description` / `safety_notes` を LLM で生成する場合は、人間が必ず
+  目視確認する。誤った安全表記 / 過信を招く記述 / 機種違いの混入を
+  チェックする。
+- `support_level=verified` の判定は **LLM のみで行わない**。実機 evidence
+  (firmware / interface / tested_items) を `validation_evidence` に明示。
 
 ## 6. 参考
 

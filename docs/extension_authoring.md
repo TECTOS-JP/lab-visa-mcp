@@ -52,6 +52,36 @@ visa-mcp extension init <pack_name>
 | `mock_basic` | minimal + `instruments/README.md` + `benchmarks/README.md` |
 | `instrument_pack` | minimal + `instruments/example_instrument.yaml` + `registry_entries/INDEX.yaml` |
 
+### 生成 YAML の形式保証 (v1.7.1)
+
+生成された `extension.yaml` は **human-readable な multi-line YAML**
+として書き出され、`yaml.safe_load()` で正しく round-trip できる。
+test (`tests/test_v171_review.py`) で各 template について保証している。
+
+### `--force` の挙動 (v1.7.1 docs 化)
+
+`--force` は **scaffold が生成する file のみ上書き** する。既存の手書き
+file (例: pack 内に手で追加した `instruments/myinst.yaml`、
+独自 `docs/` 等) は **削除されず残る**。
+
+```
+visa-mcp extension init my_pack --force
+[OK] init local.my-pack -> ./my_pack
+  WARN  extension_init_force_retains_files: --force は既存 file
+        (3 件) を残し、template が生成する file のみ上書きする
+  + extension.yaml
+  + README.md
+```
+
+完全に作り直したい場合は、手動で directory を削除してから init する:
+
+```bash
+rm -rf my_pack
+visa-mcp extension init my_pack --template minimal
+```
+
+これは「scaffold で誤って成果物を消す」事故を防ぐためのポリシー。
+
 `extension.yaml` には **catalog metadata の雛形** (summary / license /
 authors / safety_notes 等) と `stability.support_level: draft` /
 `executable_code: false` が入る。生成直後でも
@@ -108,10 +138,35 @@ visa-mcp extension doctor <extension.yaml> [--strict] [--json]
 }
 ```
 
-| `summary.*` | 意味 |
-|-------------|------|
-| `ready_to_package` | error が無く `package` 可能 |
-| `ready_for_registry_review` | strict 観点でも問題なし、registry PR を出せる |
+| `summary.*` | 意味 | gate |
+|-------------|------|------|
+| `ready_to_package` | error が無く `extension package` を成功させられる **最低条件** | local zip 化 |
+| `ready_for_registry_review` | 上記 + strict 観点でも問題なし (README / catalog.summary / catalog.license / verified evidence 完備) | **publishing / PR / registry 掲載** |
+
+`ready_to_package=true` でも `ready_for_registry_review=false` は
+自然にあり得る (例: ローカル開発中の draft pack)。
+**外部に出す前は必ず `ready_for_registry_review` を確認**する。
+
+### 出力分類 (CLI human-readable, v1.7.1)
+
+`doctor` の human-readable 出力は 3 グループに分けて表示する:
+
+```
+[WARN] doctor local.scope-pack  errors=0 warnings=2  ready_to_package=True  ready_for_registry_review=False
+  Errors (block package):
+    (none)
+  Warnings (quality):
+    WARN   [validate] missing_catalog_summary: ...
+  Strict-only issues (must fix before registry / publishing):
+    STRICT [strict_validate] strict_empty_contents: ...
+  Recommended actions:
+    fix?   add_catalog_summary: catalog.summary is shown in ...
+```
+
+- **Errors**: package 作成を妨げる問題
+- **Warnings**: 品質改善推奨 (任意)
+- **Strict-only issues**: registry review / publishing 前に必ず解消
+  (`--strict` 付き doctor では本体 errors に格上げ)
 
 `--strict` を付けると、`strict_*` warning を本体 errors に格上げ
 する (CI fail gate 向け)。default は warning として表示。
@@ -165,6 +220,10 @@ v1.7 では `extension doctor` がこの workflow の中央 hub。
 - author profile の永続化 (`~/.visa-mcp/profile.yaml` 等)
 - AI-assisted authoring (LLM に PDF → YAML 起こさせる)
 - Python plugin / backend plugin
+- **scaffold template の外部ファイル化** (現在は
+  `extension_authoring.py` 内に同梱)。v1.8+ で
+  `src/visa_mcp/templates/extensions/<name>/` に分離し、
+  `importlib.resources` で読み込む形 (Jinja2 依存は引き続き入れない)
 
 ## 関連 docs
 

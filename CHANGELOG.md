@@ -1,5 +1,74 @@
 # 変更履歴
 
+## v1.7.1 — v1.7.0 レビュー応答 (--force warning / doctor 分類表示 / docs 補強)
+
+合言葉: **「authoring の挙動と判定基準を contributor に分かりやすく伝える」**
+
+v1.7.0 の external review (P0/P1/P2) を反映した patch release。
+public API / 既存 CLI 引数 / 生成 schema すべて不変。
+
+### 変更点
+
+- **P0**: v1.7 関連 file 16 件 (src / docs / tests / README / CONTRIBUTING /
+  CHANGELOG) の LF / multi-line を parametrized test 化
+  (`tests/test_v171_review.py`)
+- **P1-2** (生成 YAML 妥当性):
+  全 template (`minimal` / `mock_basic` / `instrument_pack`) について
+  - 生成 `extension.yaml` が `> 15 行` の multi-line layout
+  - `yaml.safe_load` で round-trip 成功
+  - 期待 keys (`extension_id`, `name`, `version`, `type`, `contents`,
+    `stability`, `catalog`) 揃い
+  - `stability.executable_code == False` / `support_level == "draft"`
+  - `catalog.license == "MIT"`
+  - `validate_extension_file` が **error 0** で通る
+  を回帰防止テスト化 (`test_v171_review.py`)
+- **P1-3** (`init_extension_pack` + `docs/extension_authoring.md`):
+  `--force` で既存 directory 内に **scaffold が生成しない file
+  (手書き file 等) が残る**仕様を:
+  - 新 warning **`extension_init_force_retains_files`** で件数・sample
+    を返却
+  - docs に「scaffold で誤って成果物を消す事故を防ぐためのポリシー」と
+    明記、完全クリーンが必要な場合の手順 (rm -rf → init) も記載
+- **P1-4** (`docs/extension_authoring.md`):
+  `ready_to_package` (local zip 化の最低条件) vs
+  `ready_for_registry_review` (publishing / PR / registry 掲載の品質
+  条件) の **対比表 + gate 列**を追加し、`ready_to_package=true` でも
+  `ready_for_registry_review=false` が自然にあり得ることを強調
+- **P1-5** (`cli.py` doctor handler):
+  human-readable 出力を **3 グループに分類表示**:
+  - `Errors (block package)`
+  - `Warnings (quality)`
+  - `Strict-only issues (must fix before registry / publishing)`
+  - `Recommended actions`
+  CLI 出力からも contributor が次に何を直すべきかが直感的に分かる
+- **P1-7** (`CONTRIBUTING.md`):
+  「データ取り扱いポリシー」section を新規:
+  - 機材 / 安全 (LLM 生成は draft 必須)
+  - **計測器マニュアル / SCPI 表 / proprietary 情報** (出典 /
+    `metadata.manual_ref` 必須、NDA 内容を公開 PR に含めない)
+  - **認証情報 / raw data** (API key / password / IP / Serial 等を
+    YAML に書かない、`_system.yaml` で解決)
+  - **LLM-generated content** (人間目視確認、`support_level=verified`
+    は LLM のみで判定しない)
+- **P2-8** (`docs/extension_authoring.md`):
+  v1.8+ で scaffold template を `src/visa_mcp/templates/extensions/`
+  へ外部化 (`importlib.resources` 経由、Jinja2 依存は引き続き入れない)
+  という TODO を記録
+
+### 新規 warning_class
+
+- `extension_init_force_retains_files`
+
+### 互換性
+
+- `init_extension_pack` の signature / 戻り値 schema は不変 (warning が
+  追加されるのみ)
+- CLI 引数 / 生成 YAML 形式 / public API すべて不変
+- doctor の JSON 出力 schema は不変 (CLI の human-readable のみ強化)
+- Stable 43 / Experimental 7 / 合計 50 不変
+
+---
+
 ## v1.7.0 — Definition Pack Authoring Assistant / Scaffolding
 
 合言葉: **「良い definition pack を作りやすくする」**
