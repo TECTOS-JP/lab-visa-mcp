@@ -1,5 +1,64 @@
 # 変更履歴
 
+## v1.2.1 — v1.2 レビュー対応 (P0/P1/P2)
+
+v1.2.0 外部レビュー対応。新規 MCP ツール / CLI 無し、互換維持。
+
+### P0 確認
+
+- raw 改行: v1.2 関連 12 ファイル全て **LF only / CR=0 / 多行** で正常
+  確認 (`tests/test_v121_review.py` の parametrized テストで CI 回帰防止)
+
+### P1 改修
+
+- **P1-2: `extension_manifest.schema.json` から "stable" 表現を除去**
+  - `title`: `"Extension Manifest (definition pack) (v1.2 experimental)"`
+  - `description`: 「EXPERIMENTAL: ... v1.x 内で変更可能。Not a stable
+    plugin API」を明記
+  - `_add_preview_metadata` の汎用処理を経由せず schema 個別 override
+- **P1-3: `definition_packs.md` の `extension_id` を「reverse-DNS style
+  recommended」に表現調整**
+  - validator は小文字英数 + `.` / `-` / `_` を受け付ける緩い実装である旨
+    も併記
+- **P1-4: contents.* path traversal / 絶対パス拒否** (`extension.py`)
+  - `_check_path_safety` を追加、`extension_path_outside_pack`
+    (`error_class=validation`) を返す
+  - 5 sub-section (instruments / benchmarks / templates / mock_scenarios /
+    registry_entries) に一律適用
+- **P1-5: `validate extension` の保証範囲を `definition_packs.md` に明記**
+  - 「保証すること」5 項目 + 「保証しないこと」4 項目 (実機実行 / system
+    config 完全 compile / benchmark 実行成功 / pack 全体の semantic
+    consistency)
+  - 完全 validation は MCP tool `validate_experiment_plan` の役割と明示
+- **P1-6: empty_contents の strict mode 昇格候補を明記**
+  - 将来 `--strict` フラグで empty_contents → error、registry_entries
+    整合性チェック、SemVer range 評価、duplicate id 検出を TODO 化
+- **P2-7/8: `visa_mcp_compatibility` は記録用メタデータと明記**
+  - 互換 range の厳密評価は将来候補
+
+### テスト
+
+`tests/test_v121_review.py` 35 件:
+
+- repo 12 ファイル × LF + multi-line (24 件)
+- extension schema title/description が experimental (2 件)
+- definition_packs docs に reverse-DNS / 記録用メタデータ / 保証範囲 /
+  strict mode キーワード (4 件)
+- path traversal 拒否 (3 件: `../` / 絶対パス / 正常相対パスは通る)
+- example pack が引き続き pass (1 件)
+- v1.2.1 version (1 件)
+
+**合計 798 件 passing** (v1.2.0: 763 → v1.2.1: 798)
+
+### 互換性
+
+- 動作変更は **contents.* の path traversal / 絶対パス拒否** のみ
+  (これまで暗黙に許容されていたが、definition pack の安全性上 reject)
+- 既存 `mock_basic_pack` example は引き続き pass (相対パスのみ使用)
+- Stable API 不変。experimental スコープのみ修正。
+
+---
+
 ## v1.2.0 — Definition Extension Release
 
 合言葉: **「plugin を実装する前に、何を拡張可能にするのかを固定する」**

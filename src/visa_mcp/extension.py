@@ -160,15 +160,50 @@ def validate_extension_file(
     # 参照ファイル存在 + 各 sub-validation
     base = p.parent
     files_checked = 0
+    base_resolved = base.resolve()
 
     def _ref(rel: str) -> Path:
         return base / rel
 
+    def _check_path_safety(rel: str, field: str) -> bool:
+        """v1.2.1: contents.* path が extension.yaml 配下のみであることを
+        強制する (definition pack 外部参照は contribution の安全性に直結)
+        """
+        candidate = Path(rel)
+        if candidate.is_absolute():
+            rep.errors.append({
+                "error_class": "validation",
+                "message": (
+                    f"{field}: 絶対パスは禁止 (extension.yaml 配下の "
+                    f"相対パスのみ可): {rel}"
+                ),
+                "field_path": field,
+                "details": {"sub_class": "extension_path_outside_pack"},
+            })
+            return False
+        try:
+            resolved = (base / candidate).resolve()
+            resolved.relative_to(base_resolved)
+        except (OSError, ValueError):
+            rep.errors.append({
+                "error_class": "validation",
+                "message": (
+                    f"{field}: extension.yaml 配下を逸脱するパス (.. による "
+                    f"traversal): {rel}"
+                ),
+                "field_path": field,
+                "details": {"sub_class": "extension_path_outside_pack"},
+            })
+            return False
+        return True
+
     # instruments
     from visa_mcp.registry import validate_instrument_file
     for rel in c.instruments:
-        full = _ref(rel)
         files_checked += 1
+        if not _check_path_safety(rel, "contents.instruments"):
+            continue
+        full = _ref(rel)
         if not full.exists():
             rep.errors.append({
                 "error_class": "not_found",
@@ -191,8 +226,10 @@ def validate_extension_file(
     # benchmarks
     from visa_mcp.testing.benchmark_task import load_benchmark_task
     for rel in c.benchmarks:
-        full = _ref(rel)
         files_checked += 1
+        if not _check_path_safety(rel, "contents.benchmarks"):
+            continue
+        full = _ref(rel)
         if not full.exists():
             rep.errors.append({
                 "error_class": "not_found",
@@ -212,8 +249,10 @@ def validate_extension_file(
     # templates (DSL ExperimentPlan として)
     from visa_mcp.registry import validate_plan_file
     for rel in c.templates:
-        full = _ref(rel)
         files_checked += 1
+        if not _check_path_safety(rel, "contents.templates"):
+            continue
+        full = _ref(rel)
         if not full.exists():
             rep.errors.append({
                 "error_class": "not_found",
@@ -232,8 +271,10 @@ def validate_extension_file(
 
     # mock_scenarios (YAML として parse できることのみ確認)
     for rel in c.mock_scenarios:
-        full = _ref(rel)
         files_checked += 1
+        if not _check_path_safety(rel, "contents.mock_scenarios"):
+            continue
+        full = _ref(rel)
         if not full.exists():
             rep.errors.append({
                 "error_class": "not_found",
@@ -252,8 +293,10 @@ def validate_extension_file(
 
     # registry_entries (YAML として parse できること + entries 形式の最低限)
     for rel in c.registry_entries:
-        full = _ref(rel)
         files_checked += 1
+        if not _check_path_safety(rel, "contents.registry_entries"):
+            continue
+        full = _ref(rel)
         if not full.exists():
             rep.errors.append({
                 "error_class": "not_found",

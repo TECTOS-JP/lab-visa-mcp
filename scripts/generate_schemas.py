@@ -84,15 +84,23 @@ def main() -> int:
     print("generated: schemas/benchmark_task.schema.json")
 
     # v1.2: ExtensionManifest schema (experimental, definition pack manifest)
+    # v1.2.1: title / description から「stable」表現を完全除去
     from visa_mcp.extension import ExtensionManifest
     ext_schema = ExtensionManifest.model_json_schema()
-    _add_preview_metadata(
-        ext_schema, "extension_manifest",
-        "Extension Manifest (definition pack) (v1.2 stable)",
+    ext_schema["$id"] = (
+        "https://tectos-jp.github.io/visa-mcp/schemas/"
+        "extension_manifest.schema.v1.json"
     )
-    # v1.2 では definition pack の manifest は experimental
+    ext_schema["title"] = (
+        "Extension Manifest (definition pack) (v1.2 experimental)"
+    )
     ext_schema["x-visa-mcp-status"] = "experimental"
     ext_schema["x-compatibility"] = "subject-to-change-within-v1.x"
+    ext_schema["description"] = (
+        ext_schema.get("description", "")
+        + " (EXPERIMENTAL: definition pack manifest introduced in v1.2."
+        " The shape may change within v1.x. Not a stable plugin API.)"
+    )
     (SCHEMAS_DIR / "extension_manifest.schema.json").write_text(
         json.dumps(ext_schema, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",

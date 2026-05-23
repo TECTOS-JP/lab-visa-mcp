@@ -59,7 +59,7 @@
       "type": "object"
     }
   },
-  "description": "v1.2: definition pack manifest (`extension.yaml`) (v1.0 stable. 詳細互換保証は docs/v1_stability_policy.md 参照。 一部 experimental fields は v1.x 内で変更可能。)",
+  "description": "v1.2: definition pack manifest (`extension.yaml`) (EXPERIMENTAL: definition pack manifest introduced in v1.2. The shape may change within v1.x. Not a stable plugin API.)",
   "properties": {
     "extension_id": {
       "title": "Extension Id",
@@ -116,7 +116,7 @@
     "name",
     "version"
   ],
-  "title": "Extension Manifest (definition pack) (v1.2 stable)",
+  "title": "Extension Manifest (definition pack) (v1.2 experimental)",
   "type": "object",
   "$id": "https://tectos-jp.github.io/visa-mcp/schemas/extension_manifest.schema.v1.json",
   "x-visa-mcp-status": "experimental",
