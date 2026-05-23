@@ -1,5 +1,5 @@
 """
-v1.6: visa-mcp CLI
+v1.7: visa-mcp CLI
 
 Usage:
   visa-mcp validate instrument <path>
@@ -21,6 +21,10 @@ Usage:
   visa-mcp extension verify-package <zip-path> [--json]    # v1.5
   visa-mcp extension catalog [--installed | --packages <dir>]  # v1.6
   visa-mcp extension inspect-package <zip-path> [--json]   # v1.6
+  visa-mcp extension init <pack_name>                      # v1.7
+      [--id <ext-id>] [--template <name>] [--author <name>] [--force]
+  visa-mcp extension package <ext.yaml> --dry-run [--json] # v1.7
+  visa-mcp extension doctor <ext.yaml> [--strict] [--json] # v1.7
   visa-mcp registry overlay [--source builtin|extension]   # v1.4
   visa-mcp serve
 
@@ -296,6 +300,13 @@ def build_parser() -> argparse.ArgumentParser:
     ext_pkg.add_argument(
         "--json", action="store_true", help="JSON 出力 (CI 向け)",
     )
+    ext_pkg.add_argument(
+        "--dry-run", action="store_true",
+        help=(
+            "(v1.7) zip を作らず、含まれる予定 file / manifest preview "
+            "/ checksums 数を表示"
+        ),
+    )
     ext_pkg.set_defaults(func=cmd_extension)
 
     # v1.6: catalog (installed / package directory)
@@ -363,6 +374,52 @@ def build_parser() -> argparse.ArgumentParser:
         "--json", action="store_true", help="JSON 出力 (CI 向け)",
     )
     ext_vp.set_defaults(func=cmd_extension)
+
+    # v1.7: init (scaffold a new pack)
+    ext_init = ext_sub.add_parser(
+        "init",
+        help="(v1.7) 空の definition pack を scaffold する",
+    )
+    ext_init.add_argument("pack_name", help="生成する directory 名")
+    ext_init.add_argument(
+        "--target-dir", default=None,
+        help="親ディレクトリ (default: cwd)",
+    )
+    ext_init.add_argument(
+        "--id", dest="extension_id", default=None,
+        help="reverse-DNS extension_id (default: local.<pack_name>)",
+    )
+    ext_init.add_argument(
+        "--template", default="minimal",
+        choices=["minimal", "mock_basic", "instrument_pack"],
+        help="scaffold template (default: minimal)",
+    )
+    ext_init.add_argument(
+        "--author", default="",
+        help="catalog.authors / author に入れる名前",
+    )
+    ext_init.add_argument(
+        "--force", action="store_true",
+        help="既存 directory があっても上書き",
+    )
+    ext_init.add_argument("--json", action="store_true")
+    ext_init.set_defaults(func=cmd_extension)
+
+    # v1.7: doctor (authoring 向けまとめ確認)
+    ext_doc = ext_sub.add_parser(
+        "doctor",
+        help=(
+            "(v1.7) validate + strict + package dry-run + catalog "
+            "/ README / license / verified evidence を一括確認"
+        ),
+    )
+    ext_doc.add_argument("path", help="extension.yaml の path")
+    ext_doc.add_argument(
+        "--strict", action="store_true",
+        help="strict-only error も本体 errors に格上げ",
+    )
+    ext_doc.add_argument("--json", action="store_true")
+    ext_doc.set_defaults(func=cmd_extension)
 
     # v1.4: registry overlay
     reg = sub.add_parser(
@@ -632,6 +689,38 @@ def cmd_extension(args: argparse.Namespace) -> int:
         return 0
 
     if sub == "package":
+        # v1.7: --dry-run は zip を作らず内容 preview のみ返す
+        if getattr(args, "dry_run", False):
+            from visa_mcp.extension_authoring import package_dry_run
+            data = package_dry_run(args.path, strict=args.strict)
+            if args.json:
+                print(json.dumps({"package_dry_run": data},
+                                  ensure_ascii=False, indent=2,
+                                  default=str))
+            else:
+                icon = {"ok": "[OK]", "warning": "[WARN]",
+                        "error": "[ERR]"}.get(data["status"], "[?]")
+                print(f"{icon} DRY-RUN package "
+                      f"{data['extension_id']} v{data['version']}")
+                print(f"  package_name  : {data['package_name']}")
+                print(f"  file_count    : {data['checksums_preview_count']}")
+                print(f"  files included:")
+                for fn in data["files_included"][:20]:
+                    print(f"    + {fn}")
+                if len(data["files_included"]) > 20:
+                    print(f"    ... (+{len(data['files_included']) - 20})")
+                if data["files_excluded"]:
+                    print(f"  files excluded:")
+                    for fn in data["files_excluded"][:10]:
+                        print(f"    - {fn}")
+                for e in data["errors"]:
+                    print(f"  ERROR  {e.get('error_class')}: "
+                          f"{e.get('message')}")
+                for w in data["warnings"]:
+                    print(f"  WARN   {w.get('warning_class')}: "
+                          f"{w.get('message')}")
+            return 0 if data["status"] != "error" else 1
+
         from visa_mcp.extension_packaging import package_definition_pack
         res = package_definition_pack(
             args.path, output_dir=args.output, strict=args.strict,
@@ -674,6 +763,60 @@ def cmd_extension(args: argparse.Namespace) -> int:
             for w in data["warnings"]:
                 print(f"  WARN   {w.get('warning_class')}: "
                       f"{w.get('message')}")
+        return 0 if data["status"] != "error" else 1
+
+    if sub == "init":
+        from visa_mcp.extension_authoring import init_extension_pack
+        res = init_extension_pack(
+            args.pack_name,
+            target_dir=args.target_dir,
+            extension_id=args.extension_id,
+            template=args.template,
+            author=args.author,
+            force=args.force,
+        )
+        data = res.to_dict()
+        if args.json:
+            print(json.dumps({"init": data}, ensure_ascii=False,
+                              indent=2, default=str))
+        else:
+            icon = "[OK]" if data["status"] == "ok" else "[ERR]"
+            print(f"{icon} init {data['extension_id']} -> "
+                  f"{data['pack_path']}")
+            for fn in data["files_created"]:
+                print(f"  + {fn}")
+            for e in data["errors"]:
+                print(f"  ERROR  {e.get('error_class')}: "
+                      f"{e.get('message')}")
+            if data["status"] == "ok":
+                print("  next: visa-mcp extension doctor "
+                      f"{Path(data['pack_path']) / 'extension.yaml'}")
+        return 0 if data["status"] == "ok" else 1
+
+    if sub == "doctor":
+        from visa_mcp.extension_authoring import doctor_extension
+        rep = doctor_extension(args.path, strict=args.strict)
+        data = rep.to_dict()
+        if args.json:
+            print(json.dumps({"doctor": data}, ensure_ascii=False,
+                              indent=2, default=str))
+        else:
+            icon = {"ok": "[OK]", "warning": "[WARN]",
+                    "error": "[ERR]"}.get(data["status"], "[?]")
+            s = data["summary"]
+            print(f"{icon} doctor {data['extension_id']}  "
+                  f"errors={s['errors']} warnings={s['warnings']}  "
+                  f"ready_to_package={s['ready_to_package']}  "
+                  f"ready_for_registry_review="
+                  f"{s['ready_for_registry_review']}")
+            for e in data["errors"]:
+                print(f"  ERROR  [{e.get('stage')}] "
+                      f"{e.get('error_class')}: {e.get('message')}")
+            for w in data["warnings"]:
+                print(f"  WARN   [{w.get('stage')}] "
+                      f"{w.get('warning_class')}: {w.get('message')}")
+            for a in data["recommended_actions"]:
+                print(f"  fix?   {a['action']}: {a['reason']}")
         return 0 if data["status"] != "error" else 1
 
     print(f"unknown extension sub-command: {sub}", file=sys.stderr)

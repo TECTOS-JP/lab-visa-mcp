@@ -1,5 +1,85 @@
 # 変更履歴
 
+## v1.7.0 — Definition Pack Authoring Assistant / Scaffolding
+
+合言葉: **「良い definition pack を作りやすくする」**
+
+v1.2〜v1.6 で「定義 → install → check → package → catalog / install」
+までは揃った。v1.7 では **入口側 (authoring)** を支援する CLI を 3 本
+追加し、外部 contributor / 将来の自分が空の directory から安全な pack
+を作れる状態にする。
+
+> MCP tool 追加ゼロ。CLI 専用 (Stable 43 / Experimental 7 / 合計 50 不変)。
+> remote registry / Python plugin / signature / AI-assisted authoring
+> には進まない。
+
+### 新規 CLI subcommands
+
+```bash
+visa-mcp extension init <pack_name>
+    [--target-dir <dir>] [--id <ext-id>]
+    [--template minimal|mock_basic|instrument_pack]
+    [--author "<name>"] [--force] [--json]
+
+visa-mcp extension package <ext.yaml> --dry-run [--strict] [--json]
+
+visa-mcp extension doctor <ext.yaml> [--strict] [--json]
+```
+
+### 新規 module
+
+**`src/visa_mcp/extension_authoring.py`**:
+
+- `init_extension_pack(pack_name, *, target_dir, extension_id,
+  template, author, force)` → `InitResult`
+  - templates: `minimal` / `mock_basic` / `instrument_pack`
+  - 生成された pack は即 `validate extension` を通る
+  - catalog metadata の雛形 (summary / license / authors /
+    safety_notes) を含む。`support_level: draft` /
+    `executable_code: false`
+- `package_dry_run(extension_yaml, *, strict)` → dict
+  - zip を**作らず**、`files_included` / `files_excluded` /
+    `package_manifest_preview` / `checksums_preview_count` を返す
+  - 通常 package と同じ validation を経由
+- `doctor_extension(extension_yaml, *, strict)` → `DoctorReport`
+  - `validate` + `strict validate` + `package dry-run` + catalog /
+    README / license / verified evidence を 1 ステップで実行
+  - 構造化された **`recommended_actions`** + `summary` を返す
+  - `summary.ready_to_package` / `ready_for_registry_review` で
+    publishing 判断を即時提示
+
+### 新規 docs
+
+- **`docs/extension_authoring.md`**: scaffold → doctor → package
+  workflow を 1 本道で整理。各 CLI の引数 / 出力 / template 比較表
+- **`CONTRIBUTING.md`** (新規): definition pack PR checklist /
+  bug fix flow / ポリシー / CoC
+
+### 新規 error_class
+
+- `extension_init_unknown_template`
+- `extension_init_target_exists`
+- `extension_init_invalid_id`
+
+### 互換性
+
+- 既存 CLI 引数 / public API / schema すべて不変
+- `package --dry-run` は新規 flag で既存挙動を変えない
+- `extension init` / `doctor` は完全新規
+- Stable 43 / Experimental 7 / 合計 50 不変
+
+### v1.7 で対応しない (v1.8+ 候補)
+
+- `extension add-instrument` / `extension add-template`
+  (instrument 1 件追加の専用 CLI)
+- author profile の永続化 (`~/.visa-mcp/profile.yaml`)
+- AI-assisted authoring (LLM に PDF → YAML を起こさせる)
+- remote registry / pull CLI
+- Python plugin / backend plugin
+- replay backend 実装
+
+---
+
 ## v1.6.1 — v1.6.0 レビュー応答 (schema catalog / zip 上限 / verification status)
 
 合言葉: **「catalog を使う側」に必要な明確性と安全余白を足す**
