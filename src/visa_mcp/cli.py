@@ -1,5 +1,5 @@
 """
-v1.4: visa-mcp CLI
+v1.5: visa-mcp CLI
 
 Usage:
   visa-mcp validate instrument <path>
@@ -15,6 +15,9 @@ Usage:
   visa-mcp extension validate-installed [--json]           # v1.3
   visa-mcp extension check [<extension_id>] [--strict]     # v1.4
   visa-mcp extension inspect <extension_id> [--json]       # v1.4
+  visa-mcp extension package <extension.yaml>              # v1.5
+      [--output <dir>] [--strict] [--json]
+  visa-mcp extension verify-package <zip-path> [--json]    # v1.5
   visa-mcp registry overlay [--source builtin|extension]   # v1.4
   visa-mcp serve
 
@@ -236,6 +239,32 @@ def build_parser() -> argparse.ArgumentParser:
     ext_ins.add_argument("--json", action="store_true")
     ext_ins.set_defaults(func=cmd_extension)
 
+    # v1.5: package
+    ext_pkg = ext_sub.add_parser(
+        "package",
+        help="(v1.5) definition pack を配布可能 zip にまとめる",
+    )
+    ext_pkg.add_argument("path", help="extension.yaml の path")
+    ext_pkg.add_argument(
+        "--output", default=None,
+        help="出力 directory (default: <pack_dir>/dist)",
+    )
+    ext_pkg.add_argument(
+        "--strict", action="store_true",
+        help="strict validation を通してから package 化",
+    )
+    ext_pkg.add_argument("--json", action="store_true")
+    ext_pkg.set_defaults(func=cmd_extension)
+
+    # v1.5: verify-package
+    ext_vp = ext_sub.add_parser(
+        "verify-package",
+        help="(v1.5) package zip の整合性を検証",
+    )
+    ext_vp.add_argument("zip_path", help="検証対象の .visa-mcp-ext.zip")
+    ext_vp.add_argument("--json", action="store_true")
+    ext_vp.set_defaults(func=cmd_extension)
+
     # v1.4: registry overlay
     reg = sub.add_parser(
         "registry",
@@ -411,6 +440,51 @@ def cmd_extension(args: argparse.Namespace) -> int:
                 print(f"  WARN  {w.get('warning_class')}: "
                       f"{w.get('message')}")
         return 0 if rep["integrity"] != "invalid" else 1
+
+    if sub == "package":
+        from visa_mcp.extension_packaging import package_definition_pack
+        res = package_definition_pack(
+            args.path, output_dir=args.output, strict=args.strict,
+        )
+        data = res.to_dict()
+        if args.json:
+            print(json.dumps({"package": data},
+                              ensure_ascii=False, indent=2, default=str))
+        else:
+            icon = "[OK]" if data["status"] == "ok" else "[ERR]"
+            print(f"{icon} package {data['extension_id']} "
+                  f"v{data['version']}")
+            if data["status"] == "ok":
+                print(f"  path        : {data['package_path']}")
+                print(f"  file count  : {data['file_count']}")
+                print(f"  sha256      : {data['package_sha256']}")
+            for e in data["errors"]:
+                print(f"  ERROR  {e.get('error_class')}: "
+                      f"{e.get('message')}")
+            for w in data["warnings"]:
+                print(f"  WARN   {w.get('warning_class')}: "
+                      f"{w.get('message')}")
+        return 0 if data["status"] == "ok" else 1
+
+    if sub == "verify-package":
+        from visa_mcp.extension_packaging import verify_extension_package
+        res = verify_extension_package(args.zip_path)
+        data = res.to_dict()
+        if args.json:
+            print(json.dumps({"verify": data},
+                              ensure_ascii=False, indent=2, default=str))
+        else:
+            icon = {"ok": "[OK]", "warning": "[WARN]",
+                    "error": "[ERR]"}.get(data["status"], "[?]")
+            print(f"{icon} verify {data['extension_id']} "
+                  f"v{data['version']}  files={data['file_count']}")
+            for e in data["errors"]:
+                print(f"  ERROR  {e.get('error_class')}: "
+                      f"{e.get('message')}")
+            for w in data["warnings"]:
+                print(f"  WARN   {w.get('warning_class')}: "
+                      f"{w.get('message')}")
+        return 0 if data["status"] != "error" else 1
 
     print(f"unknown extension sub-command: {sub}", file=sys.stderr)
     return 2

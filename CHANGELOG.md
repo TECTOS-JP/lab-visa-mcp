@@ -1,5 +1,130 @@
 # 変更履歴
 
+## v1.5.0 — Definition Pack Packaging / Publishing Preparation
+
+合言葉: **「作れる / install できる / 整合できる」→「配布可能な成果物として
+まとめられる」**
+
+v1.4 で integrity check / strict validation が整った。v1.5 では、外部
+contributor が作った definition pack を **配布可能 zip パッケージ**
+にまとめ、受け取り側で **再検証**できる仕組みを CLI に追加する。
+
+> v1.5 は **packaging まで**。zip からの install / remote install /
+> signature には進まない (v1.6+ 候補)。
+
+### 新規 MCP ツール: **ゼロ** (Stable 43 / Experimental 7 / 合計 50 不変)
+
+extension package / verify-package も管理操作のため CLI に閉じる。
+AI エージェント MCP surface は v1.0 以降一貫して 50 のまま。
+
+### 新規 CLI subcommands
+
+```bash
+visa-mcp extension package <extension.yaml>
+    [--output <dir>] [--strict] [--json]
+visa-mcp extension verify-package <zip-path> [--json]
+```
+
+### 新規 module
+
+**`src/visa_mcp/extension_packaging.py`**:
+
+- `package_definition_pack(extension_yaml, *, output_dir, strict=False)`
+  → `PackageResult`
+- `verify_extension_package(zip_path)` → `VerifyResult`
+- 定数: `PACKAGE_FORMAT="visa-mcp-extension-package"`,
+  `PACKAGE_FORMAT_VERSION="1.0"`, `PACKAGE_SUFFIX=".visa-mcp-ext.zip"`
+
+### Package 形式
+
+```
+<extension_id>-<version>.visa-mcp-ext.zip
+├── extension.yaml
+├── package_manifest.json          ← v1.5 必須
+├── checksums.sha256               ← v1.5 必須 (sha256sum 互換)
+├── README.md                      (任意、--strict で error 候補)
+├── instruments/ benchmarks/ templates/ ...
+```
+
+**`package_manifest.json`** に持つ field:
+- `package_format` / `package_format_version`
+- `extension_id` / `extension_version`
+- `created_at` / `created_by`
+- `executable_code: false` (v1.5 で恒に false)
+- `file_count` / `files: [{path, sha256}, ...]`
+- `checksums_file: "checksums.sha256"` / `checksums_sha256`
+
+### package 時の検査
+
+1. `validate_extension_file(strict=...)` を必ず通す
+2. 除外ルール (`.git/`, `__pycache__/`, `*.pyc`, `.DS_Store` 等)
+3. zip-slip / 絶対 path / `..` の二重 check
+4. deterministic な順序で zip 化 (sorted by rel path)
+5. zip 全体の sha256 を返却
+
+### verify-package の検査
+
+- zip として読める
+- すべての member が **zip slip safe** (絶対 path / drive letter /
+  `..` を拒否)
+- `extension.yaml` / `package_manifest.json` / `checksums.sha256` 必須
+- `package_manifest.executable_code: true` を error
+- zip 内 file の sha256 vs `checksums.sha256` / `manifest.files[*].sha256`
+- tmp 展開後に `validate_extension_file()` を再実行
+
+### strict mode の追加チェック
+
+- `support_level=verified` で `validation_evidence` 空 →
+  `strict_verified_requires_evidence` (v1.4 から)
+- pack に `README.md` が無い → **`strict_missing_pack_readme`** (v1.5 新規)
+- v1.4.1 で導入した `strict_registry_entry_*` 系も包含
+
+### 新規 error_class
+
+- `extension_validation_failed`
+- `empty_package`
+- `package_path_unsafe`
+- `package_invalid_zip`
+- `package_zip_slip`
+- `package_missing_required_file`
+- `package_manifest_invalid`
+- `package_format_invalid`
+- `package_executable_code_true`
+- `package_checksum_mismatch`
+- `package_file_missing`
+- `package_manifest_sha_mismatch`
+- `strict_missing_pack_readme`
+
+### 新規 warning_class
+
+- `missing_pack_readme`
+- `package_extra_file`
+
+### 新規 docs
+
+- **`docs/extension_packaging.md`**: package 形式 / 検査 / strict mode /
+  v1.6+ ロードマップ
+- **`docs/extension_publishing_checklist.md`**: 配布前 / registry PR
+  前のチェックリスト (10 セクション)
+
+### 互換性
+
+- 既存 install 機能・schema は変更なし
+- package zip は v1.6+ で local install 元として受け取る予定 (forward
+  compatibility のため `package_format_version` を持たせた)
+- Stable 43 / Experimental 7 / 合計 50 不変
+
+### v1.5 で対応しない (v1.6+ 候補)
+
+- zip からの install (`visa-mcp extension install <zip>`)
+- remote URL / git からの install
+- registry pull CLI
+- signature / trust store / 公開鍵検証
+- automatic update
+- Python plugin / entry_points discovery
+
+---
+
 ## v1.4.1 — v1.4.0 レビュー応答 (strict 整合 / inspect 明示 / taxonomy 整理)
 
 合言葉: **「strict mode の挙動を一貫させ、inspect が何を見ているかを明示する」**
