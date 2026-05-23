@@ -1,5 +1,92 @@
 # 変更履歴
 
+## v1.0.1 — v1.0 レビュー対応 (P0/P1) + 整合性 single source
+
+v1.0.0 外部レビュー P0/P1 対応。新規 MCP ツール無し、互換維持。
+
+### P0 確認
+
+- raw 改行: 12 ファイル全て **LF only / CR=0 / 多行** で正常確認
+  (`tests/test_v101_review.py` の parametrized テストで CI 回帰防止)。
+
+### P1 改修
+
+#### P1-2: Stable / Experimental 単一 source of truth
+
+- **`src/visa_mcp/stability.py` 新規**: Stable / Experimental / Raw を
+  カテゴリ別に列挙する **唯一の source**。docs / README / tests がここから参照
+- v1.0.0 release note の **「Stable 35」は誤記**で、実際の Stable 数は **43**
+  (Core 14 + Recipe/Job 9 + Group/Map 4 + DSL 6 + Observation 3 + Monitor 4 +
+  Results 2 + Ingest 1)。`docs/v1_stability_policy.md` を **43** に訂正
+- `tests/test_v101_review.py` で stable_count == 43 / experimental_count == 5
+  / total == 48 を CI 検証。stable と experimental の重複も検出
+- v1_stability_policy.md に列挙された **全 stable / experimental tool 名**が
+  実際に列挙されているか自動 cross-check
+
+#### P1-3: README の results tools 表記修正
+
+- `get_experiment_results` / `export_experiment_results` の README 行から
+  **`(experimental)` を削除** し `(stable v1.x)` に変更
+  (release note 上は Stable 分類だったため整合)
+- `tests/test_v101_review.py::test_readme_results_tools_not_marked_experimental`
+  で回帰防止
+
+#### P1-4: docs/bundle_export.md 新規
+
+`export_experiment_bundle` 専用 docs:
+
+- bundle 目的 (再検証 / 共有 / 監査 / 記事化、**完全再現実行は v1.x 非対応**)
+- bundle layout (manifest / plan / compiled_summary / job_record /
+  job_summary / timeline / results.{jsonl,csv} / monitor_data / audit)
+- manifest.json 例 + checksums の意味
+- path 安全策 (default dir / traversal 拒否 / overwrite 既定)
+- SHA-256 の二段検証 (zip 全体 + 中身各 file)
+- experimental スコープと **`bundle_version="1.0"` の存在保証** (informal)
+- v1.1+ ロードマップ (validate_bundle / import_bundle_for_analysis /
+  replay_bundle_with_mock)
+
+#### P1-6: `extract_pdf_commands` の保証範囲を明記
+
+`docs/v1_stability_policy.md` に注記:
+
+- v1.x で **tool 名・引数・response 構造**は固定
+- **PDF 抽出精度 / メーカー資料ごとの成功率は保証対象外**
+- 抽出結果は YAML 草案として人間レビューを前提
+
+### README 整合修正
+
+- 「Core 35 tools」→「**Stable 43 tools + Experimental 5 tools**」へ
+- raw 2 tools は env-gated を明示
+- 「48 個 / raw 系は別途」→「48 個 / raw 系 **2 個** は別途」と数を明示
+
+### 新規ファイル
+
+| ファイル | 役割 |
+|---------|------|
+| `src/visa_mcp/stability.py` | Stable / Experimental tool 分類の唯一 source |
+| `docs/bundle_export.md` | bundle export 専用 docs |
+| `tests/test_v101_review.py` | review response テスト (37 件) |
+
+### テスト
+
+- `tests/test_v101_review.py` 37 件:
+  - repo 12 ファイル × LF + multi-line (24 件)
+  - version v1.0.1 確認
+  - **stability module 数の整合** (43 / 5 / 48) + 重複検出 + 全 tool が
+    v1_stability_policy.md に存在
+  - README の results tools が experimental 表記でない
+  - docs/bundle_export.md の必須キーワード存在
+  - extract_pdf_commands の保証範囲注記
+  - schema files の stable status 維持
+- **合計 669 件 passing** (v1.0.0: 632 → v1.0.1: 669)
+
+### 互換性
+
+- 純粋な docs / README / test の整合性修正
+- Stable API 不変。動作変更なし。
+
+---
+
 ## v1.0.0 — AI エージェント実験自動化評価基盤の安定化
 
 合言葉: **「新機能追加ではなく、安定化・互換保証・再現性・公開準備」**

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "visa-mcp"
-version = "1.0.0"
+version = "1.0.1"
 description = "MCP server for controlling GPIB / USB / Serial / LAN instruments via PyVISA. Define commands per-instrument with YAML."
 readme = "README.md"
 license = { text = "MIT" }

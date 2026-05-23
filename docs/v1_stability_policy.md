@@ -99,9 +99,16 @@ v1.x 内で **名称・引数・response 構造を固定**。新規 optional 引
 
 | ツール | 役割 |
 |--------|------|
-| `extract_pdf_commands` | PDF からコマンド候補抽出 |
+| `extract_pdf_commands` | PDF からコマンド候補抽出 (★) |
 
-**合計 35 個 (stable v1.x)**
+> **★ `extract_pdf_commands` 保証範囲** (v1.0.1 明記):
+> v1.x 内で **tool 名・引数・response 構造**は固定する。
+> ただし **PDF 抽出精度 / メーカー資料ごとの成功率は保証対象外**。
+> 抽出結果は YAML 草案として人間レビューを前提とする。
+
+**合計 43 個 (stable v1.x)** ※ 実数は `src/visa_mcp/stability.py` の
+`STABLE_TOOLS` を **単一 source of truth** とし、CI で整合性を確認
+(`tests/test_v101_review.py`)
 
 ## 3. Experimental MCP tools (v1.x 内で変更可能)
 
@@ -116,7 +123,7 @@ v1.x 内で **名称・引数・response 構造を固定**。新規 optional 引
 | `list_locks` | ResourceScheduler との source-of-truth 統合が未完了 |
 | `export_experiment_bundle` (v1.0 新規) | bundle 仕様 / sha256 verify 経路が初期 |
 
-**合計 5 個 (experimental v1.x)**
+**合計 5 個 (experimental v1.x)** ※ 同上 (`EXPERIMENTAL_TOOLS`)
 
 ## 4. Stable schemas (v1.x 互換保証)
 
