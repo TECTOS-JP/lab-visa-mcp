@@ -5,16 +5,19 @@ v0.7.0: describe_instrument / get_state / get_last_measurement を追加。
 """
 from __future__ import annotations
 import logging
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from fastmcp import FastMCP
 
 from visa_mcp.response_envelope import make_envelope, make_error
-from visa_mcp.session_manager import SessionManager
 from visa_mcp.state_query import query_all_state
 from visa_mcp.utils.param_validator import validate_and_build_scpi, ParameterValidationError
-from visa_mcp.visa_manager import VisaManager
 from visa_mcp import safety as sf
+
+if TYPE_CHECKING:
+    # v1.11: backend layer top-level import 排除 (型ヒントのみ)
+    from visa_mcp.session_manager import SessionManager
+    from visa_mcp.visa_manager import VisaManager
 
 logger = logging.getLogger(__name__)
 

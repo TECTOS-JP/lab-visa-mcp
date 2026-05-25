@@ -13,7 +13,7 @@ import asyncio
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 import yaml
 
@@ -23,7 +23,13 @@ from visa_mcp.job import JobManager, JobStore
 from visa_mcp.job.state_machine import is_terminal
 from visa_mcp.models.instrument_def import InstrumentDefinition
 from visa_mcp.observation import build_run_summary, compute_job_outcome
-from visa_mcp.session_manager import InstrumentSession
+
+if TYPE_CHECKING:
+    # v1.11: 型ヒント目的。実体 (`InstrumentSession(...)`) は内部関数で
+    # lazy import する (`_build_sessions` 内で `from
+    # visa_mcp.session_manager import InstrumentSession`)。
+    from visa_mcp.session_manager import InstrumentSession
+
 from visa_mcp.system_config import (
     SystemConfig, InstrumentBinding, ExperimentUnit,
 )
@@ -107,6 +113,9 @@ def _build_session_manager(
     definitions: dict[str, InstrumentDefinition],
 ):
     """各 resource に definition を bind した SessionManager 互換オブジェクト"""
+    # v1.11: lazy import (lab-executor 候補 module の top-level に
+    # session_manager を載せない、KNOWN_V111_TO_RESOLVE 解消)
+    from visa_mcp.session_manager import InstrumentSession
     sessions: dict[str, InstrumentSession] = {}
     # bindings の resource → 同名 definition (基本的に 1:1 で対応する fixture 想定)
     for alias, binding in sys_cfg.instruments.items():

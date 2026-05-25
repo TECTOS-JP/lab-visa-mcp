@@ -17,7 +17,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import Any, Awaitable, Callable
+from typing import Any, Awaitable, Callable, TYPE_CHECKING
 
 from visa_mcp.experiment_ir import (
     CommandStep, Plan, WaitStep,
@@ -26,14 +26,19 @@ from visa_mcp.experiment_ir import (
 )
 from visa_mcp.group.barrier import BarrierCoordinator
 from visa_mcp.group.target import TargetExecution, FailurePolicy
-from visa_mcp.session_manager import InstrumentSession
 from visa_mcp.step_executor import execute_command_step
 from visa_mcp.polling_executor import (
     execute_wait_until,
     execute_wait_for_condition,
     execute_wait_for_stable,
 )
-from visa_mcp.visa_manager import VisaManager
+
+if TYPE_CHECKING:
+    # v1.11: backend / session 系は型ヒントだけ。実体は JobManager から
+    # 注入 (`visa: VisaManager`, `session_resolver: Callable[..., InstrumentSession | None]`)。
+    # v2.0 で `InstrumentBackend` Protocol 経由に置換予定。
+    from visa_mcp.session_manager import InstrumentSession
+    from visa_mcp.visa_manager import VisaManager
 
 logger = logging.getLogger(__name__)
 

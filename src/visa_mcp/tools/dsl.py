@@ -9,6 +9,7 @@ v0.8.0: Experiment DSL MCP ツール (4 個)
 from __future__ import annotations
 import logging
 import uuid as _uuid
+from typing import TYPE_CHECKING
 
 from fastmcp import FastMCP
 
@@ -18,7 +19,10 @@ from visa_mcp.dsl.template import apply_template_override, TemplateOverrideError
 from visa_mcp.job import JobManager
 from visa_mcp.job.state_machine import JobStatus
 from visa_mcp.response_envelope import make_envelope, make_error
-from visa_mcp.session_manager import SessionManager
+
+if TYPE_CHECKING:
+    # v1.11: backend layer top-level import 排除
+    from visa_mcp.session_manager import SessionManager
 
 logger = logging.getLogger(__name__)
 

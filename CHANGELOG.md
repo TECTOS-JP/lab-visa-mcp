@@ -1,5 +1,114 @@
 # 変更履歴
 
+## v1.11.0 — Separation Refactor + Split Rehearsal
+
+合言葉: **「分離はまだしない。ただし、分離しても壊れないことを CI で
+証明する」**
+
+ロードマップ v6 Phase A 最終ステップ。**v2.0 で実際にリポジトリを
+分割する前の最後の内部リファクタ**。public API / MCP tool 数
+(Stable 43 + Experimental 7 = 50) / DSL schema / extension pack 形式
+すべて不変。
+
+### 主な変更
+
+**1. `KNOWN_V111_TO_RESOLVE = 0` (P0 達成)**
+
+v1.10 で tracking していた 10 件の lab→visa top-level violation を
+すべて `if TYPE_CHECKING:` ブロック + 関数内 lazy import に移動し、
+runtime 候補 module の top-level から backend layer 依存を排除した。
+
+- `visa_mcp.dsl.compiler`
+- `visa_mcp.group.executor`
+- `visa_mcp.job.manager`
+- `visa_mcp.testing.benchmark_runner` (`InstrumentSession` 実体化箇所は
+  関数内 lazy import に変更)
+- `visa_mcp.tools.dsl`
+- `visa_mcp.tools.info`
+- `visa_mcp.tools.recipes`
+
+`src/visa_mcp/dev/ownership_check.py` の `KNOWN_V111_TO_RESOLVE` を
+空 set に変更。新規 violation は CI で即 fail。
+
+**2. Backend Protocol 実体化 (`src/visa_mcp/backends/`)**
+
+| Module | Owner | 役割 |
+|--------|-------|------|
+| `backends/base.py` | shared | `InstrumentBackend` Protocol (v1.1 から継承) |
+| `backends/pyvisa_backend.py` | visa-mcp | `PyVisaBackend` adapter (新規, `VisaManager` 包む) |
+| `backends/mock_backend.py` | lab-executor-mcp | `MockBackend` adapter (新規, `MockVisaManager` 包む) |
+
+`PyVisaBackend()` / `MockBackend()` は引数なしで構築でき、内部で対応する
+manager を lazy import する。runtime module は `InstrumentBackend` 経由で
+backend を扱える状態 (実際の経路置換は v2.0)。
+
+**3. Split Rehearsal (`src/visa_mcp/dev/split_rehearsal.py`)**
+
+`module_ownership.yaml` を基に tmp directory に
+`lab_executor_candidate/` ツリーを生成する CLI:
+
+```
+python -m visa_mcp.dev.split_rehearsal --out tmp/lab_executor_candidate
+```
+
+- lab-executor owner の module を copy
+- import 文を `visa_mcp.<lab module>` → `lab_executor_candidate.<...>`
+  に rewrite (backend / shared / visa-mcp owner は維持)
+- release artifact に **含めない** (テスト中に tmp 生成 → 検査 →
+  自動削除)
+
+これにより v2.0 で `git filter-repo` + path rename を実行する前の
+**dry-run** が CI で常時走る。
+
+**4. `docs/raw_visa.md` draft 追加**
+
+v1.10.1 で TODO 化していた visa-mcp 側 v2.0 用 docs を draft 作成。
+PyVISA setup / `list_resources` / env-gated raw tools
+(`VISA_MCP_ALLOW_RAW=1`) / lab-executor runtime との composition root
+関係を整理。
+
+**5. Manifest / docs 更新**
+
+- `module_ownership.yaml`: 新規 module 3 件追加
+  (`backends.pyvisa_backend`, `backends.mock_backend`,
+  `dev.split_rehearsal`)、statistics 73 → 76
+- `docs/separation/notes.md`: v1.11 達成内容を追記
+
+### tests
+
+`tests/test_v111_separation_refactor.py` (新規 14 件):
+- `test_no_known_v1_11_violations` (P0 gate)
+- `test_runtime_modules_no_toplevel_visa_manager_import`
+- `test_instrument_backend_protocol_runtime_checkable`
+- `test_pyvisa_backend_satisfies_protocol` /
+  `test_mock_backend_satisfies_protocol`
+- `test_*_backend_constructible_without_explicit_visa`
+- `test_split_rehearsal_generates_candidate`
+- `test_split_rehearsal_candidate_has_no_visa_mcp_imports`
+- `test_split_rehearsal_cli_runs`
+- `test_raw_visa_doc_exists`
+- `test_stable_tool_count_unchanged` (Stable 43 / Experimental 7 不変)
+- `test_backends_init_exposes_adapters`
+
+全 test: **1533 passing** (v1.10.1 比 +14)
+
+### 互換性
+
+- MCP tool 名 / 引数 / response: 不変 (Stable 43 / Experimental 7)
+- DSL `dsl_version=0.8`: 完全互換
+- extension pack 形式 / `.install_meta.json`: 完全互換
+- import path: 不変 (v2.0 で shim 化予定)
+- backend class 名: 新規追加のみ、既存 `VisaManager` / `MockVisaManager`
+  は v2.0 まで残る
+
+### v2.0.0-rc1 で取り組むこと (preview)
+
+- feature freeze
+- `git filter-repo` dry-run + wheel build verification
+  (lab-executor-mcp wheel が PyVISA 不要であること確認)
+- `docs/v2_migration.md` draft 公開 (両 repo 用)
+- migration guide review
+
 ## v1.10.1 — v1.10.0 レビュー応答 (format guard 拡張 / statistics 自動検証 / 補強)
 
 合言葉: **「v1.10 で導入した分離設計台帳を、format guard と自動検証で

@@ -1,8 +1,12 @@
 """Recipe 関連の MCP ツール (v0.3.0)"""
 from __future__ import annotations
+from typing import TYPE_CHECKING
 from fastmcp import FastMCP
-from visa_mcp.session_manager import SessionManager
 from visa_mcp.recipe_executor import execute_recipe as _execute_recipe
+
+if TYPE_CHECKING:
+    # v1.11: backend layer top-level import 排除 (型ヒントのみ)
+    from visa_mcp.session_manager import SessionManager
 
 
 def register_tools(mcp: FastMCP, session_mgr: SessionManager) -> None:

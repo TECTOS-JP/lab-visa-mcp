@@ -20,10 +20,13 @@ import yaml
 ROOT = Path(__file__).parent.parent
 
 
-def test_version_is_1_10_x():
+def test_version_is_1_10_or_later():
     from visa_mcp import __version__
-    # v1.10.0 / v1.10.1 / etc を許容 (patch release で test 失敗させない)
-    assert __version__.startswith("1.10.")
+    # v1.10.* or later (v1.11.* / v1.12.* / v2.0 等を許容)
+    parts = [int(p) for p in __version__.split(".")[:2]]
+    major, minor = parts[0], parts[1]
+    assert (major, minor) >= (1, 10), (
+        f"v1.10 audit テストは v1.10+ で動く想定 (got {__version__})")
 
 
 def test_module_ownership_manifest_complete():
@@ -47,15 +50,15 @@ def test_no_new_lab_to_visa_top_level_violations():
 
 
 def test_known_v1_11_to_resolve_tracked():
-    """v1.11 で解消する既知 violation は tracking されている"""
+    """v1.10 で 10 件登録した既知 violation の tracking が機能する
+    (v1.11 で 0 件まで削減されたため、件数の上限のみ確認)"""
     from visa_mcp.dev.ownership_check import (
         KNOWN_V111_TO_RESOLVE, collect_report,
     )
-    # 既知 violation の登録数 (v1.10 時点で 10 件)
-    assert len(KNOWN_V111_TO_RESOLVE) >= 1
     rep = collect_report()
-    # report で known_pending として一致登録されている
-    assert rep["known_v1_11_to_resolve_count"] == len(KNOWN_V111_TO_RESOLVE)
+    # report で known_pending として一致登録されている (0 でも OK)
+    assert rep["known_v1_11_to_resolve_count"] == len(
+        KNOWN_V111_TO_RESOLVE)
 
 
 def test_split_manifest_paths_exist():

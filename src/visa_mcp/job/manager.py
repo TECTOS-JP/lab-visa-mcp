@@ -14,7 +14,15 @@ import asyncio
 import logging
 import time
 import uuid
-from typing import Any
+from typing import Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    # v1.11: backend layer の top-level import を排除
+    # (KNOWN_V111_TO_RESOLVE 解消)。JobManager は外部 (server / CLI)
+    # から SessionManager / VisaManager を注入される composition root の
+    # 一段下。v2.0 では `InstrumentBackend` Protocol を持つ。
+    from visa_mcp.session_manager import SessionManager
+    from visa_mcp.visa_manager import VisaManager
 
 from visa_mcp.experiment_ir import (
     CommandStep, Plan, WaitStep,
@@ -40,8 +48,6 @@ from visa_mcp.polling_executor import (
     _do_one_poll,
     POLL_SLEEP_SLICE_S,
 )
-from visa_mcp.session_manager import SessionManager
-from visa_mcp.visa_manager import VisaManager
 # v0.6.0: group / map
 from visa_mcp.group import (
     TargetExecution, FailurePolicy,

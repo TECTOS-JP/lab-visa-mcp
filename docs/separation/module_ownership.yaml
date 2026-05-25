@@ -61,6 +61,19 @@ modules:
     owner: shared
     reason: InstrumentBackend Protocol 本体
 
+  visa_mcp.backends.pyvisa_backend:
+    owner: visa-mcp
+    reason: >
+      v1.11 で実体化した PyVisaBackend adapter。VisaManager を内部に持ち
+      InstrumentBackend Protocol を満たす。v2.0 では visa-mcp 側に残る。
+
+  visa_mcp.backends.mock_backend:
+    owner: lab-executor-mcp
+    reason: >
+      v1.11 で実体化した MockBackend adapter。MockVisaManager を内部に持ち
+      InstrumentBackend Protocol を満たす。PyVISA 非依存なので v2.0 では
+      lab-executor-mcp 側へ移送される。
+
   # ==================================================
   # Runtime (lab-executor-mcp)
   # ==================================================
@@ -351,12 +364,20 @@ modules:
   visa_mcp.dev.ownership_check:
     owner: lab-executor-mcp
     reason: v1.10 で追加した ownership manifest verifier + dependency graph generator
+  visa_mcp.dev.split_rehearsal:
+    owner: lab-executor-mcp
+    reason: >
+      v1.11 で追加した split rehearsal generator。
+      `module_ownership.yaml` を基に tmp/ へ lab_executor_candidate ツリーを
+      生成し、import rewrite dry-run を可能にする。
 
 # Statistics for v1.10 (manual count、test で実装と一致を確認):
 statistics:
-  lab_executor_mcp_count: 59
-  visa_mcp_count: 4
+  lab_executor_mcp_count: 61
+  visa_mcp_count: 5
   split_count: 8
   shared_count: 2
   unclassified_count: 0   # CI で 0 を強制
-  # 計 73 module (test_v110_separation_audit.py で実 owner count と一致確認)
+  # 計 76 module (v1.11 で backends/{mock,pyvisa}_backend.py +
+  # dev/split_rehearsal.py を追加し 73 → 76)
+  # test_v110_separation_audit.py で実 owner count と一致確認

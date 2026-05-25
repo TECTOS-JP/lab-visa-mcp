@@ -35,26 +35,13 @@ LAZY_EXCEPTIONS = {
 }
 
 
-# v1.10 で検出済 + v1.11 で InstrumentBackend Protocol 経由化により
-# 解消する **known top-level violations**。CI fail を防ぐが、v1.11 で
-# 必ず減らす。各 entry は (lab-executor module, visa-mcp module) の
-# tuple。
-#
-# 各 violation の v1.11 解消方針:
-#   - session_manager 利用箇所 → backends.InstrumentBackend 経由
-#   - visa_manager 直接 import 箇所 → backends.PyVisaBackend 経由
-KNOWN_V111_TO_RESOLVE = {
-    ("visa_mcp.dsl.compiler", "visa_mcp.session_manager"),
-    ("visa_mcp.group.executor", "visa_mcp.session_manager"),
-    ("visa_mcp.group.executor", "visa_mcp.visa_manager"),
-    ("visa_mcp.job.manager", "visa_mcp.session_manager"),
-    ("visa_mcp.job.manager", "visa_mcp.visa_manager"),
-    ("visa_mcp.testing.benchmark_runner", "visa_mcp.session_manager"),
-    ("visa_mcp.tools.dsl", "visa_mcp.session_manager"),
-    ("visa_mcp.tools.info", "visa_mcp.session_manager"),
-    ("visa_mcp.tools.info", "visa_mcp.visa_manager"),
-    ("visa_mcp.tools.recipes", "visa_mcp.session_manager"),
-}
+# v1.11: KNOWN_V111_TO_RESOLVE = 0 件
+# v1.10 で 10 件あった既知 violation はすべて
+# `if TYPE_CHECKING:` ブロックまたは関数内 lazy import に移動して
+# top-level の backend layer 依存を排除した。
+# 詳細: docs/separation/notes.md
+# 新規 violation が混入したら CI で即 fail させる。
+KNOWN_V111_TO_RESOLVE: set[tuple[str, str]] = set()
 
 
 def _module_name_for_path(path: Path) -> str | None:

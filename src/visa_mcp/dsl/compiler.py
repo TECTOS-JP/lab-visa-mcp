@@ -14,7 +14,13 @@ from __future__ import annotations
 import logging
 import math
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    # v1.11: backend layer import を runtime 候補 module の top-level から
+    # 排除 (KNOWN_V111_TO_RESOLVE 解消)。compiler は SessionManager を
+    # 型ヒントとしてのみ参照し、実体は呼び出し側 (JobManager) が注入。
+    from visa_mcp.session_manager import SessionManager
 
 from visa_mcp.dsl.schema import (
     ExperimentPlan, Step,
@@ -31,7 +37,6 @@ from visa_mcp.experiment_ir import (
     BarrierStep,
 )
 from visa_mcp.group.resolver import resolve_resource, ResolveError
-from visa_mcp.session_manager import SessionManager
 from visa_mcp.system_config import SystemConfig
 from visa_mcp import safety as sf
 
