@@ -1,5 +1,38 @@
 # 変更履歴
 
+## v2.0.1 — v2.0.0 レビュー応答 (raw VISA env var 統一 / docs/raw_visa.md 更新 / README line-ending note)
+
+合言葉: **「v2.0.0 直後の peripheral 整備」**
+
+v2.0.0 external review (P1/P2) 反映の small patch。public API /
+dependency / shim 動作すべて不変。
+
+### 変更点
+
+- **P1-2** (raw VISA 環境変数名統一): release note と
+  `docs/raw_visa.md` で別名 (`VISA_MCP_ENABLE_RAW_TOOLS` /
+  `VISA_MCP_ALLOW_RAW`) が混在していたが、実装の真正値
+  **`VISA_MCP_ENABLE_RAW_COMMANDS=1`** (`src/visa_mcp/tools/
+  commands.py` で実際に判定する変数) に統一
+  - `docs/raw_visa.md` の bash example
+  - `CHANGELOG.md` v2.0.0 entry
+  - tool 名も実装に合わせて修正:
+    `send_command` → `unsafe_send_command`,
+    `query_instrument` → `unsafe_query_instrument`
+- **P1-1** (`docs/raw_visa.md`):
+  - 冒頭の "v1.11 draft / v2.0.0-rc1 で公開予定" 表記を
+    "v2.0.0 で正式公開" へ更新
+- **P1** (`README.md`): **line-ending note** を冒頭に追加
+  (raw viewer 仕様で「1 line」と mis-report される件は
+  `.gitattributes` + CI gate で実体担保している旨を明文化)
+
+### 互換性
+
+- API / shim forward 動作: 不変
+- dependency (`lab-executor-mcp >= 2.0.2, < 3.0.0`): 不変
+- 環境変数: **既存実装 `VISA_MCP_ENABLE_RAW_COMMANDS` のまま**
+  (docs の誤記を修正しただけで、利用者の設定変更は不要)
+
 ## v2.0.0 — PyVISA Backend Package + Compatibility Shim (final release)
 
 **visa-mcp** は v2.0 から **lab-executor-mcp 用の PyVISA backend
@@ -32,7 +65,7 @@ lab-executor-mcp  →  visa-mcp  (禁止)
 
 - `PyVisaBackend` (`InstrumentBackend` adapter)
 - `VisaManager` / `SessionManager` / `BusManager`
-- raw VISA tools (env-gated `VISA_MCP_ENABLE_RAW_TOOLS=1`)
+- raw VISA tools (env-gated `VISA_MCP_ENABLE_RAW_COMMANDS=1`)
 - `tools/discovery.py` (PyVISA resource 列挙 → `list_resources`)
 - `visa-mcp serve` 互換 entry point (composition root)
 - `visa_mcp.*` 旧 import path の **shim** (27 module)
@@ -78,7 +111,7 @@ lab-executor-mcp  →  visa-mcp  (禁止)
 接続確認 / デバッグ / 緊急確認用。env-gated を維持:
 
 ```bash
-export VISA_MCP_ENABLE_RAW_TOOLS=1
+export VISA_MCP_ENABLE_RAW_COMMANDS=1
 visa-mcp serve
 ```
 

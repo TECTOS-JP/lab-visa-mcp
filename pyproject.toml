@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "visa-mcp"
-version = "2.0.0"
+version = "2.0.1"
 description = "PyVISA backend + compatibility shim for lab-executor-mcp. Hardware (GPIB / USB / Serial / LAN) communication layer."
 readme = "README.md"
 license = { text = "MIT" }
@@ -27,7 +27,7 @@ dependencies = [
     # 側へ移った。visa-mcp は PyVISA backend + 旧 import shim。
     "lab-executor-mcp>=2.0.2,<3.0.0",
     "pyvisa>=1.14.0",
-    "pydantic>=2.0.0",
+    "pydantic>=2.0.1",
     "pyyaml>=6.0",
 ]
 

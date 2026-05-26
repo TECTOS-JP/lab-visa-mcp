@@ -1,8 +1,8 @@
-# Raw VISA backend (visa-mcp draft, v2.0 以降の責務)
+# Raw VISA backend (visa-mcp v2.0 以降の責務)
 
-> v1.11 draft。v2.0 で `visa-mcp` リポジトリを **PyVISA backend に特化**
-> させたあとの構成を明示するためのドキュメント。`lab-executor-mcp`
-> (runtime / DSL / ecosystem) との関係をここに集約する。
+> v2.0.0 で正式公開。`visa-mcp` は v2.0 以降 **PyVISA backend +
+> 旧 import shim** に特化する。`lab-executor-mcp`
+> (runtime / DSL / ecosystem) との関係はここに集約する。
 
 ## visa-mcp v2.0 以降の責務
 
@@ -69,16 +69,16 @@ list_resources()  # Stable, v1.0 から不変
 された場合のみ expose される。
 
 ```bash
-export VISA_MCP_ALLOW_RAW=1
-visa-mcp serve  # raw tools が有効になる
+export VISA_MCP_ENABLE_RAW_COMMANDS=1
+visa-mcp serve  # raw tools が有効になる (+ non-strict safety mode 必須)
 ```
 
-該当 MCP tool (Experimental):
+該当 MCP tool (Experimental, env-gated):
 
 | Tool | 説明 | 危険度 |
 |------|------|--------|
-| `send_command(resource, command)`  | 任意 SCPI write | 高 |
-| `query_instrument(resource, command)` | 任意 SCPI query | 中 |
+| `unsafe_send_command(resource, command)`  | 任意 SCPI write | 高 |
+| `unsafe_query_instrument(resource, command)` | 任意 SCPI query | 中 |
 
 これらは definition pack の `commands:` を経由しない **生 SCPI** 透過
 なので、`safety.disallow_terms` / `parameter_validator` 等の保護が

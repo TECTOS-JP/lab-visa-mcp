@@ -6,6 +6,13 @@
 **v2.0+: PyVISA backend + compatibility shim for
 [`lab-executor-mcp`](https://github.com/TECTOS-JP/lab-executor-mcp).**
 
+> **Line-ending note** (v2.0.1):
+> GitHub raw view が一部 viewer で file を「1 line」と mis-report する
+> ことがあります。`.gitattributes` で LF を強制しており、CI で TOML /
+> YAML parse + `compileall` + multiline guard を常時検証しています。
+> 実体確認は clean clone (`git clone --branch v2.0.0` 等) または GitHub
+> file viewer を使ってください。
+
 > **v2.0 で分離されました**
 > v1.x まで visa-mcp 1 パッケージで提供していた「実験実行 runtime / DSL
 > / extension ecosystem」は **`lab-executor-mcp`** に移りました。
