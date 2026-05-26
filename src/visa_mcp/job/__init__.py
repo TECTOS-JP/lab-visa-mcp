@@ -1,37 +1,49 @@
+"""DEPRECATED shim package → `lab_executor.job` (visa-mcp v2.0)
+
+This package previously contained the visa-mcp v1.x
+implementation. In v2.0 the experiment-execution runtime moved to
+`lab-executor-mcp`. Importing `visa_mcp.job` now forwards to
+`lab_executor.job` with a DeprecationWarning.
+
+Migration:
+    # old
+    from visa_mcp.job import X
+    from visa_mcp.job.compiler import Y
+    # new
+    from lab_executor.job import X
+    from lab_executor.job.compiler import Y
+
+The shim itself will remain through the v2.x series but may be
+removed in v3.0+. See `docs/v2_migration.md`.
 """
-visa_mcp.job ── Job 実行基盤 (v0.5.0-rc2)
+from __future__ import annotations
+import sys as _sys
+import warnings as _warnings
 
-長時間 Recipe / 実験を非同期 Job として管理する。
-
-- state_machine: Job 状態の定義と遷移ルール
-- store: SQLite による Job メタデータの永続化
-- manager: Job の生成・追跡・キャンセル
-- executor: バックグラウンドで recipe を実行
-
-v0.8.0 のリポジトリ分割時に experiment_mcp/job/ へそのまま移動できるよう、
-visa_mcp 本体への直接依存を最小化している。
-"""
-from visa_mcp.job.state_machine import (
-    JobStatus,
-    CancelMode,
-    can_transition,
-    TERMINAL_STATUSES,
-    ACTIVE_STATUSES,
+_warnings.warn(
+    "visa_mcp.job is deprecated; use lab_executor.job instead.",
+    DeprecationWarning,
+    stacklevel=2,
 )
-from visa_mcp.job.store import JobStore, JobRecord
-from visa_mcp.job.manager import JobManager
-from visa_mcp.job.scheduler import ResourceScheduler, ResourceBusyError, QueuePolicy
 
-__all__ = [
-    "JobStatus",
-    "CancelMode",
-    "can_transition",
-    "TERMINAL_STATUSES",
-    "ACTIVE_STATUSES",
-    "JobStore",
-    "JobRecord",
-    "JobManager",
-    "ResourceScheduler",
-    "ResourceBusyError",
-    "QueuePolicy",
-]
+import lab_executor.job as _le  # noqa: E402
+
+# Re-export top-level attributes
+from lab_executor.job import *  # noqa: F401,F403,E402
+
+# Submodule import + aliasing so
+# `from visa_mcp.job.<sub> import X` resolves through
+# `lab_executor.job.<sub>`.
+import lab_executor.job.manager as _sub_manager  # noqa: E402
+import lab_executor.job.store as _sub_store  # noqa: E402
+import lab_executor.job.scheduler as _sub_scheduler  # noqa: E402
+import lab_executor.job.state_machine as _sub_state_machine  # noqa: E402
+_submodules: dict[str, object] = {
+    "visa_mcp.job.manager": _sub_manager,
+    "visa_mcp.job.store": _sub_store,
+    "visa_mcp.job.scheduler": _sub_scheduler,
+    "visa_mcp.job.state_machine": _sub_state_machine,
+}
+for _name, _mod in _submodules.items():
+    _sys.modules[_name] = _mod
+del _name, _mod, _submodules, _le, _sys, _warnings

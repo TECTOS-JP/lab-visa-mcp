@@ -3,6 +3,23 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 
+**v2.0+: PyVISA backend + compatibility shim for
+[`lab-executor-mcp`](https://github.com/TECTOS-JP/lab-executor-mcp).**
+
+> **v2.0 で分離されました**
+> v1.x まで visa-mcp 1 パッケージで提供していた「実験実行 runtime / DSL
+> / extension ecosystem」は **`lab-executor-mcp`** に移りました。
+> visa-mcp は v2.0+ で **PyVISA backend layer + 旧 import shim** に
+> 特化します。
+>
+> - **実機 backend が必要**: `pip install visa-mcp` (自動的に
+>   `lab-executor-mcp` も入る)
+> - **実機 backend 不要 (benchmark / dry-run のみ)**:
+>   `pip install lab-executor-mcp`
+> - **既存の import**: `from visa_mcp.extension import ...` 等は
+>   v2.0 で **DeprecationWarning 付きで動作**。詳細は
+>   [`docs/v2_migration.md`](docs/v2_migration.md)
+
 **MCP server for controlling GPIB / USB / Serial / LAN instruments via PyVISA.**
 
 LLM（Claude Code / Claude Desktop など MCP 対応クライアント）から、SCPI 計測器と非 SCPI 計測器の両方を統一的に操作できるサーバーです。マニュアルから抽出したコマンドを YAML で定義すれば、機器固有の知識なしに自然言語で計測を自動化できます。

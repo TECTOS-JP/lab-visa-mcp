@@ -9,66 +9,43 @@ on:
 
 jobs:
   test:
-    name: pytest (full, with pyvisa)
+    name: v2.0 visa-mcp shim + backend smoke
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Install
+      - name: Install (visa-mcp + lab-executor-mcp from PyPI / git)
         run: |
           python -m pip install --upgrade pip
+          # v2.0.0-rc1: lab-executor-mcp >=2.0.2 を依存として install
+          # (PyPI 公開前は git tag から install する)
+          pip install "git+https://github.com/TECTOS-JP/lab-executor-mcp.git@v2.0.2#egg=lab-executor-mcp"
           pip install -e .
           pip install pytest pytest-asyncio pytest-mock pyvisa
-      - name: Run tests (skip hardware)
-        run: pytest -k "not hardware_integration" -q
+      - name: import smoke
+        run: |
+          python -c "import visa_mcp; print('visa-mcp:', visa_mcp.__version__)"
+          python -c "import lab_executor; print('lab-executor-mcp:', lab_executor.__version__)"
+      - name: shim + backend smoke tests (v2.0)
+        run: pytest tests/test_v200_shim.py -v
 
-  pyvisa-not-installed:
-    name: separation boundary (pyvisa NOT installed)
+  build:
+    name: wheel build verification
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Install without pyvisa
+      - name: Build wheel
         run: |
-          python -m pip install --upgrade pip
-          pip install -e .
-          pip install pytest pytest-asyncio pytest-mock
-      - name: Ensure pyvisa is NOT installed
+          pip install build
+          python -m build
+      - name: Install wheel + import
         run: |
-          pip uninstall -y pyvisa pyvisa-py || true
-          ! python -c "import pyvisa" 2>/dev/null
-      - name: runtime candidate modules import without pyvisa
-        run: |
-          python -c "import visa_mcp.dsl; import visa_mcp.extension; import visa_mcp.extension_packaging; import visa_mcp.extension_install; import visa_mcp.extension_catalog; import visa_mcp.extension_authoring; import visa_mcp.extension_integrity; import visa_mcp.instrument_authoring; import visa_mcp.observation; import visa_mcp.testing"
-      - name: dependency_report (CLI)
-        run: python -m visa_mcp.dev.dependency_report --json
-      - name: boundary smoke tests
-        run: pytest tests/test_separation_boundary.py -v
-      - name: validate / extension CLI smoke (no pyvisa)
-        run: |
-          python -m visa_mcp.cli validate extension examples/extensions/mock_basic_pack/extension.yaml --json > /dev/null
-          python -m visa_mcp.cli extension catalog --packages examples/extensions/ --json > /dev/null || true
-
-  lint:
-    name: format / multi-line guards (repo-wide)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-      - name: Install
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e .
-          pip install pytest pytest-asyncio pytest-mock pyvisa
-      - name: Repo-wide format guard (v1.9.1 single source of truth)
-        # tests/test_repo_format_guard.py が repo 全体を sweep し、
-        # CR / 1-5 行潰れ / workflow YAML 形式を検査する
-        run: pytest tests/test_repo_format_guard.py -v
-      - name: Per-version format tests (legacy, parametrized lists)
-        run: pytest -k "lf_only or multiline" -q
+          pip install "git+https://github.com/TECTOS-JP/lab-executor-mcp.git@v2.0.2#egg=lab-executor-mcp"
+          pip install dist/*.whl
+          python -c "import visa_mcp; print('visa-mcp:', visa_mcp.__version__)"
+          python -c "from visa_mcp.backends.pyvisa_backend import PyVisaBackend; b=PyVisaBackend(); print('PyVisaBackend OK')"

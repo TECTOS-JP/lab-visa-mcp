@@ -1,5 +1,91 @@
 # 変更履歴
 
+## v2.0.0-rc1 — PyVISA backend + compatibility shim for lab-executor-mcp
+
+合言葉: **「visa-mcp は v2.0 から PyVISA backend package。runtime は
+lab-executor-mcp に取り込む」**
+
+v2.0 分離リリースの **visa-mcp 側の rc1**。`lab-executor-mcp v2.0.x`
+を依存に取り込み、visa-mcp 側はバックエンド層と旧 import 互換 shim に
+特化した。
+
+### 依存方向
+
+```
+visa-mcp  →  lab-executor-mcp  (許可)
+lab-executor-mcp  →  visa-mcp  (禁止)
+```
+
+### 変更点
+
+- **P0** (`pyproject.toml`):
+  - version `1.11.1` → `2.0.0-rc1`
+  - `lab-executor-mcp >= 2.0.2, < 3.0.0` を新規依存に追加
+  - 旧 dependency (pdfplumber) を削除 (lab-executor 側へ)
+- **P0** runtime / DSL / extension ecosystem を **shim** 化:
+  - 単一 file shim (20 件): `audit.py` / `extension*.py` /
+    `instrument_authoring.py` / `instrument_registry.py` /
+    `observation.py` / `polling_executor.py` / `response_envelope.py` /
+    `response_parser.py` / `safety.py` / `stability.py` /
+    `state_query.py` / `system_config.py` / `recipe_executor.py` /
+    `step_executor.py` / `registry.py` 等
+  - package shim (7 件、`sys.modules` aliasing で submodule も解決):
+    `dsl/` / `job/` / `group/` / `experiment_ir/` / `models/` /
+    `testing/` / `utils/`
+  - すべての shim は import 時に `DeprecationWarning` を発し、
+    `from lab_executor.* import *` に forward する
+- **visa-mcp 側に残す** (実装そのまま):
+  - `visa_manager.py` / `session_manager.py` / `bus_manager.py`
+  - `backends/pyvisa_backend.py` (`InstrumentBackend` adapter)
+  - `tools/discovery.py` (PyVISA resource 列挙)
+  - `tools/commands.py` (raw VISA + env-gated)
+  - `server.py` / `cli.py` (composition root)
+- **`scripts/convert_to_shim.py`** (新規): 再現可能な shim 化 script
+  (`visa-mcp v1.x checkout から v2.0 shim 状態へ変換)
+- **CI 全面刷新** (`.github/workflows/ci.yml`):
+  - `test`: lab-executor-mcp を git tag (`v2.0.2`) から install +
+    visa-mcp install + `tests/test_v200_shim.py` smoke
+  - `build`: wheel build + install + import smoke
+  - 旧 separation-boundary / multi-line guard CI は v1.x 用途のため
+    削除 (lab-executor-mcp 側で継承済み)
+- **`tests/test_v200_shim.py`** (新規 18 件):
+  version / lab-executor 依存 / shim DeprecationWarning / submodule
+  alias / Stable 43 + Experimental 7 = 50 / backend layer / CLI smoke
+- **`tests/_legacy_v1_archived/`**: v1.x の 1500+ tests を archive
+  ディレクトリへ移動 (動作は lab-executor-mcp 側のテストで担保)
+
+### 互換性
+
+- **旧 import path**: すべて DeprecationWarning 付きで動作
+  - `from visa_mcp.extension import ...`
+  - `from visa_mcp.dsl.compiler import ...`
+  - `from visa_mcp.job import ...`
+  - 等
+- **MCP tool 数**: Stable 43 + Experimental 7 = 50 (lab-executor 経由
+  で不変)
+- **DSL `dsl_version=0.8`**: 完全互換
+- **extension pack 形式 / `.install_meta.json`**: 完全互換
+- **`~/.visa-mcp/extensions/` install path**: 継続使用
+
+### CLI status
+
+`visa-mcp serve` / `visa-mcp list-resources` / raw VISA tools は従来
+互換。`visa-mcp extension ...` / `visa-mcp instrument ...` 等は shim
+経由で動作 (`DeprecationWarning` 付き)。
+
+### 検証
+
+```
+pytest tests/test_v200_shim.py    18 passed
+pytest tests/test_session_manager.py tests/test_visa_manager_locking.py \
+       tests/test_raw_commands.py + shim  43 passed
+```
+
+### 次フェーズ
+
+- レビュー + GitHub Actions green 確認後 `v2.0.0` 本番 release
+- `lab-executor-mcp` の PyPI 公開 → visa-mcp の依存も PyPI に変更
+
 ## v1.11.1 — v1.11.0 レビュー応答 (docstring / split_rehearsal AST verify / docs 補強)
 
 合言葉: **「v2.0 直前の境界 docs を v1.11 実体化状態に揃える」**

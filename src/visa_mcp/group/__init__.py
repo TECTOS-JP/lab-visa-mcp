@@ -1,28 +1,49 @@
-"""
-v0.6.0: Group / Map execution
+"""DEPRECATED shim package → `lab_executor.group` (visa-mcp v2.0)
 
-- TargetExecution IR (1 target = 1 plan + required_resources + bindings)
-- FailurePolicy (continue / stop_on_first_error / stop_if_failure_rate_exceeds)
-- GroupExecutor (concurrency / partial_failure / retry / cancel)
-- Resolver ($psu → resource_name 経由 system_config)
+This package previously contained the visa-mcp v1.x
+implementation. In v2.0 the experiment-execution runtime moved to
+`lab-executor-mcp`. Importing `visa_mcp.group` now forwards to
+`lab_executor.group` with a DeprecationWarning.
 
-v0.8.0 のリポジトリ分割時に experiment_mcp/group/ へそのまま移動できるよう、
-visa_mcp 本体への直接依存は最小化 (visa_manager, session_manager, experiment_ir,
-system_config のみ)。
+Migration:
+    # old
+    from visa_mcp.group import X
+    from visa_mcp.group.compiler import Y
+    # new
+    from lab_executor.group import X
+    from lab_executor.group.compiler import Y
+
+The shim itself will remain through the v2.x series but may be
+removed in v3.0+. See `docs/v2_migration.md`.
 """
-from visa_mcp.group.target import TargetExecution, FailurePolicy
-from visa_mcp.group.resolver import (
-    resolve_resource,
-    resolve_unit_bindings,
-    collect_target_resources,
-    ResolveError,
+from __future__ import annotations
+import sys as _sys
+import warnings as _warnings
+
+_warnings.warn(
+    "visa_mcp.group is deprecated; use lab_executor.group instead.",
+    DeprecationWarning,
+    stacklevel=2,
 )
 
-__all__ = [
-    "TargetExecution",
-    "FailurePolicy",
-    "resolve_resource",
-    "resolve_unit_bindings",
-    "collect_target_resources",
-    "ResolveError",
-]
+import lab_executor.group as _le  # noqa: E402
+
+# Re-export top-level attributes
+from lab_executor.group import *  # noqa: F401,F403,E402
+
+# Submodule import + aliasing so
+# `from visa_mcp.group.<sub> import X` resolves through
+# `lab_executor.group.<sub>`.
+import lab_executor.group.executor as _sub_executor  # noqa: E402
+import lab_executor.group.barrier as _sub_barrier  # noqa: E402
+import lab_executor.group.target as _sub_target  # noqa: E402
+import lab_executor.group.resolver as _sub_resolver  # noqa: E402
+_submodules: dict[str, object] = {
+    "visa_mcp.group.executor": _sub_executor,
+    "visa_mcp.group.barrier": _sub_barrier,
+    "visa_mcp.group.target": _sub_target,
+    "visa_mcp.group.resolver": _sub_resolver,
+}
+for _name, _mod in _submodules.items():
+    _sys.modules[_name] = _mod
+del _name, _mod, _submodules, _le, _sys, _warnings

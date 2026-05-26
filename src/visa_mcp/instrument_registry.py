@@ -1,61 +1,27 @@
+"""DEPRECATED shim → `lab_executor.instrument_registry` (visa-mcp v2.0)
+
+This module previously contained the visa-mcp v1.x implementation.
+In v2.0 the experiment-execution runtime moved to
+`lab-executor-mcp`. Importing `visa_mcp.instrument_registry`
+now forwards to `lab_executor.instrument_registry` with a DeprecationWarning.
+
+Migration:
+    # old
+    from visa_mcp.instrument_registry import X
+    # new
+    from lab_executor.instrument_registry import X
+
+The shim itself will remain through the v2.x series but may be
+removed in v3.0+. See `docs/v2_migration.md`.
+"""
 from __future__ import annotations
-import logging
-from pathlib import Path
+import warnings as _warnings
 
-import yaml
-from pydantic import ValidationError
+_warnings.warn(
+    "visa_mcp.instrument_registry is deprecated; "
+    "use lab_executor.instrument_registry instead.",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
-from visa_mcp.models.instrument_def import InstrumentDefinition
-from visa_mcp.utils.idn_matcher import match_definition
-
-logger = logging.getLogger(__name__)
-
-
-class InstrumentRegistry:
-    def __init__(self, yaml_dir: str | Path) -> None:
-        self._yaml_dir = Path(yaml_dir)
-        self._definitions: list[InstrumentDefinition] = []
-        self._load_all()
-
-    def _load_all(self) -> None:
-        self._definitions.clear()
-        for path in sorted(self._yaml_dir.glob("*.yaml")):
-            if path.name.startswith("_"):
-                continue  # _template.yaml などをスキップ
-            self._load_file(path)
-        logger.info("%d 件の機器定義をロードしました。", len(self._definitions))
-
-    def _load_file(self, path: Path) -> None:
-        try:
-            with path.open(encoding="utf-8") as f:
-                data = yaml.safe_load(f)
-            defn = InstrumentDefinition.model_validate(data)
-            self._definitions.append(defn)
-            logger.debug("ロード済み: %s (%s)", defn.display_name, path.name)
-        except (yaml.YAMLError, ValidationError, Exception) as e:
-            logger.warning("定義ファイルのロード失敗 %s: %s", path.name, e)
-
-    def reload(self) -> int:
-        """ホットリロード。再ロード後の定義件数を返す。"""
-        self._load_all()
-        return len(self._definitions)
-
-    def match_idn(self, idn_response: str) -> InstrumentDefinition | None:
-        return match_definition(idn_response, self._definitions)
-
-    def list_definitions(self) -> list[dict]:
-        return [
-            {
-                "manufacturer": d.metadata.manufacturer,
-                "model": d.metadata.model,
-                "description": d.metadata.description,
-                "command_count": len(d.commands),
-            }
-            for d in self._definitions
-        ]
-
-    def get_definition(self, manufacturer: str, model: str) -> InstrumentDefinition | None:
-        for d in self._definitions:
-            if d.metadata.manufacturer == manufacturer and d.metadata.model == model:
-                return d
-        return None
+from lab_executor.instrument_registry import *  # noqa: F401,F403
