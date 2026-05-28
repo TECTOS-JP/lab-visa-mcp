@@ -1,5 +1,99 @@
 # 変更履歴
 
+## v2.1.1 — Discovery diagnostics: empty-with-success + resource_not_found
+
+合言葉: **「device が消えた状態を agent に伝える」**
+
+Codex 導入テスト (v2.1.0 リリース後) で「v2.1.0 の logic は正しく
+動いているが、device が VISA から消えている状態 (USB が unplug
+されているなど) を agent が次の行動に繋げにくい」ことが判明。
+
+具体的には:
+
+- `list_resources(query="USB?*")` → `count: 0`
+- `discover_resources_safe(...)` → `partial_success: true`、ただし
+  `resources: []`
+- `probe_resource("USB0::...")` → `VI_ERROR_RSRC_NFOUND (-1073807343)`
+
+いずれも v2.1.0 schema では一般的な error / success に丸まり、
+agent が「device 不在」と「driver 異常」を切り分けにくかった。
+
+### `discover_resources_safe` 拡張
+
+新規 field を response 直下に追加:
+
+- **`empty_with_success: bool`** — 1 つ以上の interface が success
+  で、かつ全 query 合計の resource 数が 0 なら True
+- `data.resource_count: int` — 全 query 合計の resource 数
+
+`empty_with_success=True` の場合、`recommended_next_actions` に
+専用のメッセージを差し込む:
+
+```
+All queried interfaces returned 0 resources. ...
+Check device power and cable for the expected instrument(s).
+Open NI MAX and confirm the resource appears under Devices and
+Interfaces.
+If the device was recently re-plugged, the resource name may have
+changed; re-run discover_resources_safe after waiting a few seconds.
+```
+
+`failed_interfaces > 0` の従来 next actions と独立して併記される。
+
+### `probe_resource` 拡張
+
+`VI_ERROR_RSRC_NFOUND` (-1073807343) を専用 `error_class` に分類:
+
+- 従来: `error_class="visa_open_resource_failed"` (一般 error)
+- 新規: `error_class="visa_resource_not_found"` (device 不在系)
+
+加えて、不在系のときだけ `recommended_next_actions` を返す:
+
+```
+Run list_resources(query="USB?*") (or matching interface filter) to
+check if the resource is still enumerated.
+Verify device power and USB / GPIB cable.
+Open NI MAX and confirm the resource name appears under the right
+interface.
+If the device was recently disconnected and reconnected, the VISA
+resource name may have changed; re-enumerate first.
+```
+
+### Tests (14 件 pass)
+
+新規:
+
+- `test_discover_safe_empty_with_success_flag` — 全 success / 0
+  resource で `empty_with_success=True` + 専用 next actions
+- `test_discover_safe_not_empty_no_empty_flag` — resource あれば
+  False
+- `test_probe_resource_rsrc_nfound_classification` —
+  `error_class="visa_resource_not_found"` + `code=-1073807343` +
+  `list_resources` / `NI MAX` / `cable` を含む next actions
+- `test_probe_resource_other_error_keeps_generic_class` — RSRC_NFOUND
+  以外は従来通り `visa_open_resource_failed`
+
+### 互換性
+
+- `discover_resources_safe` 既存 field (`success` / `partial_success`
+  / `data.resources` / `data.queries` / `data.successful_interfaces`
+  / `data.failed_interfaces` / `recommended_next_actions`) は不変
+- `data.resource_count` と top-level `empty_with_success` は **追加
+  only**
+- `probe_resource` の `error_class` は VI_ERROR_RSRC_NFOUND の場合
+  のみ `visa_open_resource_failed` → `visa_resource_not_found` に
+  変化 (他はそのまま)。agent が error_class で分岐していた場合は
+  注意
+
+### 既知の non-issue
+
+Codex テストで観測された `count: 0` 状態自体は visa-mcp 側で発生
+原因ではなく、**device / NI MAX / USB cable 側の問題**。本 release
+はそれを agent に伝わる形で報告するためのものであり、自動的に
+device を発見し直すものではない。
+
+---
+
 ## v2.1.0 — VISA Discovery Diagnostics / Probe Resource
 
 合言葉: **「全件列挙が壊れても、USB は使えるとわかる」**

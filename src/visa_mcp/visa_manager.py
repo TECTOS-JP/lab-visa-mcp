@@ -233,12 +233,31 @@ class VisaManager:
             }
             code = getattr(e, "error_code", None)
             if code is None and hasattr(e, "args") and e.args:
-                # __cause__ 経由のことが多い
                 cause = getattr(e, "__cause__", None)
                 if cause is not None:
                     code = getattr(cause, "error_code", None)
             if code is not None:
                 err["code"] = int(code)
+            # v2.1.1: VI_ERROR_RSRC_NFOUND を専用 error_class へ昇格 +
+            # device 切断系の next actions を提示
+            msg_upper = str(e).upper()
+            is_rsrc_nfound = (
+                (code == -1073807343)
+                or ("VI_ERROR_RSRC_NFOUND" in msg_upper)
+            )
+            if is_rsrc_nfound:
+                err["error_class"] = "visa_resource_not_found"
+                result["recommended_next_actions"] = [
+                    "Run list_resources(query=\"USB?*\") (or the "
+                    "matching interface filter) to check if the "
+                    "resource is still enumerated.",
+                    "Verify device power and USB / GPIB cable.",
+                    "Open NI MAX and confirm the resource name "
+                    "appears under the right interface.",
+                    "If the device was recently disconnected and "
+                    "reconnected, the VISA resource name may have "
+                    "changed; re-enumerate first.",
+                ]
             result["error"] = err
         return result
 
@@ -300,8 +319,28 @@ class VisaManager:
         any_success = bool(successful)
         any_failure = bool(failed)
         partial = any_success and any_failure
+        # v2.1.1: 「list_resources は成功しているが resource が 1 件も
+        # 列挙されていない」状態を検出 (device 切断 / 電源 / driver
+        # 未登録などの environment 起因が多い)
+        total_resources = len(all_resources)
+        empty_with_success = any_success and total_resources == 0
 
         recommended: list[str] = []
+        if empty_with_success:
+            recommended.append(
+                "All queried interfaces returned 0 resources. The "
+                "VISA backend is responding but no instruments are "
+                "currently enumerated.")
+            recommended.append(
+                "Check device power and cable for the expected "
+                "instrument(s).")
+            recommended.append(
+                "Open NI MAX and confirm the resource appears under "
+                "Devices and Interfaces.")
+            recommended.append(
+                "If the device was recently re-plugged, the resource "
+                "name may have changed; re-run discover_resources_safe "
+                "after waiting a few seconds.")
         if any_failure:
             recommended.append(
                 "Try list_resources(query=\"USB?*\") to isolate USB "
@@ -318,8 +357,10 @@ class VisaManager:
         return {
             "success": any_success,
             "partial_success": partial,
+            "empty_with_success": empty_with_success,
             "data": {
                 "resources": all_resources,
+                "resource_count": total_resources,
                 "queries": per_query,
                 "successful_interfaces": successful,
                 "failed_interfaces": failed,

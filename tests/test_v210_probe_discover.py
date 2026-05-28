@@ -219,3 +219,80 @@ def test_visa_mcp_v210_version():
     import visa_mcp
     parts = visa_mcp.__version__.split(".")
     assert int(parts[0]) >= 2 and int(parts[1]) >= 1
+
+
+# ============================================================
+# v2.1.1: empty-with-success + VI_ERROR_RSRC_NFOUND classification
+# ============================================================
+
+
+@pytest.mark.asyncio
+async def test_discover_safe_empty_with_success_flag():
+    """全 interface 成功 / 全 resource 0 → empty_with_success=True +
+    専用 recommended_next_actions"""
+    mgr = _make_mgr()
+    fake_rm = MagicMock()
+    fake_rm.list_resources.return_value = []
+    mgr._rm = fake_rm
+    res = await mgr.discover_resources_safe(
+        queries=["USB?*", "GPIB?*"])
+    assert res["success"] is True
+    assert res["partial_success"] is False
+    assert res["empty_with_success"] is True
+    assert res["data"]["resource_count"] == 0
+    actions = res["recommended_next_actions"]
+    joined = " ".join(actions)
+    # device 起因の next actions が含まれる
+    assert any("0 resources" in a or "device power" in a.lower()
+                or "NI MAX" in a for a in actions)
+
+
+@pytest.mark.asyncio
+async def test_discover_safe_not_empty_no_empty_flag():
+    """resource が 1 件以上あれば empty_with_success=False"""
+    mgr = _make_mgr()
+    fake_rm = MagicMock()
+    fake_rm.list_resources.return_value = ["USB0::INSTR"]
+    mgr._rm = fake_rm
+    res = await mgr.discover_resources_safe(queries=["USB?*"])
+    assert res["empty_with_success"] is False
+    assert res["data"]["resource_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_probe_resource_rsrc_nfound_classification():
+    """VI_ERROR_RSRC_NFOUND (-1073807343) は error_class=
+    visa_resource_not_found に分類し、専用 next actions を付ける"""
+    mgr = _make_mgr()
+    fake_rm = MagicMock()
+    err = OSError(
+        "VI_ERROR_RSRC_NFOUND (-1073807343): Insufficient location "
+        "information or the requested device or resource is not "
+        "present in the system.")
+    err.error_code = -1073807343
+    fake_rm.open_resource.side_effect = err
+    mgr._rm = fake_rm
+    res = await mgr.probe_resource("USB0::0x0B3E::INSTR")
+    assert res["success"] is False
+    assert res["error"]["error_class"] == "visa_resource_not_found"
+    assert res["error"]["code"] == -1073807343
+    actions = res["recommended_next_actions"]
+    joined = " ".join(actions)
+    assert "list_resources" in joined
+    assert "NI MAX" in joined or "cable" in joined.lower()
+
+
+@pytest.mark.asyncio
+async def test_probe_resource_other_error_keeps_generic_class():
+    """RSRC_NFOUND 以外は visa_open_resource_failed のまま"""
+    mgr = _make_mgr()
+    fake_rm = MagicMock()
+    err = OSError("VI_ERROR_SYSTEM_ERROR (-1073807360)")
+    err.error_code = -1073807360
+    fake_rm.open_resource.side_effect = err
+    mgr._rm = fake_rm
+    res = await mgr.probe_resource("GPIB0::2::INSTR")
+    assert res["error"]["error_class"] == "visa_open_resource_failed"
+    # こちらは専用 recommended_next_actions は付かない
+    assert "recommended_next_actions" not in res or \
+        res.get("recommended_next_actions") is None
