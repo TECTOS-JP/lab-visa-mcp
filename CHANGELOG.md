@@ -1,5 +1,81 @@
 # 変更履歴
 
+## v2.1.0 — VISA Discovery Diagnostics / Probe Resource
+
+合言葉: **「全件列挙が壊れても、USB は使えるとわかる」**
+
+Codex 導入テストで「GPIB ドライバ異常が全件列挙を巻き込んで USB
+列挙まで失敗させる」という実環境問題が見つかった。本 release は
+**lab-executor-mcp 側の機能追加ではなく**、visa-mcp の discovery
+レイヤを補強する。
+
+### 新規 MCP tool
+
+- **`probe_resource(resource_name, timeout_ms=3000)`** — VISA
+  resource を `open_resource` → 属性読取 (interface_type /
+  resource_class) → `close` **だけ**で疎通確認。`*IDN?` / `query` /
+  `write` は **一切送らない** (test で固定)。VI_ERROR_SYSTEM_ERROR
+  等は structured error (`error_class` / `type` / `code` / `message`)
+  で返す。raise しない。
+- **`discover_resources_safe(queries=[...])`** — query 別の
+  `list_resources` を順次実行し、部分成功を返す。default は
+  `["USB?*", "GPIB?*", "ASRL?*", "TCPIP?*"]`。GPIB 異常で全件列挙が
+  失敗する環境でも USB resource を捨てない。`success` /
+  `partial_success` / `successful_interfaces` / `failed_interfaces`
+  / `recommended_next_actions` を構造化して返す。
+
+### 既存 tool 拡張
+
+- **`list_resources` docstring 強化** — `query="USB?*"` 等の
+  interface 別 filter 使い方を明記、全件列挙失敗時の代替手段として
+  推奨
+- **`identify_all_instruments(query="?*::INSTR")`** — v2.1.0 で
+  `query` 引数を追加。一部 interface だけ識別したい時 (例:
+  `query="USB?*"`) に使う
+
+### 安全性 (test で固定)
+
+- `probe_resource` は `*IDN?` / `query` / `write` / `read` を **絶対に
+  呼ばない**。pyvisa の resource mock の method 呼び出し回数 0 を
+  assert
+- `probe_resource` は失敗時にも `query_performed=false` /
+  `write_performed=false` を返す
+- `probe_resource` は属性読取失敗時にも `finally` で必ず close
+
+### README
+
+- 新規 「Resource discovery with query filters (v2.1+)」セクション
+  — `USB?*` / `GPIB?*` / `TCPIP?*` / `ASRL?*` filter の使い方、
+  `discover_resources_safe` と `probe_resource` の用途を明記
+
+### Tests
+
+`tests/test_v210_probe_discover.py`: 10 件 pass
+
+- `probe_resource`: open/close success / open failure structured
+  error / **does_not_query_or_write** (P0 safety) / closes on success
+  / closes on attribute failure
+- `discover_resources_safe`: partial_success (USB ok / GPIB fail) /
+  all_success / all_failure / default queries
+
+### v2.1 で **やらないこと**
+
+- `doctor visa` CLI (v2.2+ 候補)
+- `VISA_MCP_VISA_LIBRARY` 環境変数 (v2.2+ 候補)
+- manual resource alias 登録
+- `list_resources` / `identify_*` の return schema 破壊的変更
+
+### 互換性
+
+- `list_resources` / `identify_instrument` の戻り値 schema は v2.0
+  と同一
+- `identify_all_instruments` の戻り値も同一 (新規 `query` 引数は
+  default `"?*::INSTR"` で v2.0 互換)
+- 新 tool 2 件 (`probe_resource` / `discover_resources_safe`) の
+  追加のみ、stable 既存 tool は不変
+
+---
+
 ## v2.0.1 — v2.0.0 レビュー応答 (raw VISA env var 統一 / docs/raw_visa.md 更新 / README line-ending note)
 
 合言葉: **「v2.0.0 直後の peripheral 整備」**

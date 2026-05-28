@@ -102,15 +102,49 @@ Claude に話しかける：
 > [`docs/backend_abstraction.md`](docs/backend_abstraction.md)、
 > 単一 source は `src/visa_mcp/stability.py`。
 
+## Resource discovery with query filters (v2.1+)
+
+`list_resources` は `query` 引数で interface 別の絞り込みに対応:
+
+- `list_resources(query="USB?*")` — USB のみ
+- `list_resources(query="GPIB?*")` — GPIB のみ
+- `list_resources(query="TCPIP?*")` — TCP/IP のみ
+- `list_resources(query="ASRL?*")` — シリアル のみ
+
+**全件列挙が一部 interface の異常で失敗する場合**、まず query を
+絞って試すこと。例えば GPIB ドライバの問題 (NI-488.2 未インストール
+等) により全件列挙が `VI_ERROR_SYSTEM_ERROR` で失敗する環境でも、
+USB resource は `query="USB?*"` で取得できる。
+
+`list_resources` / `probe_resource` / `discover_resources_safe` は
+`*IDN?` / `query` / `write` / 任意の raw VISA コマンドを **一切送らない**。
+
+### `discover_resources_safe(queries=[...])`
+
+v2.1.0 で追加された safe discovery。`USB?*` / `GPIB?*` / `ASRL?*` /
+`TCPIP?*` を個別に試し、**1 つでも成功すれば success=true** を返す。
+部分成功時は `partial_success=true`、成功 interface と失敗
+interface を `successful_interfaces` / `failed_interfaces` で報告。
+失敗時は `recommended_next_actions` で対処案を提示。
+
+### `probe_resource(resource_name, timeout_ms=3000)`
+
+v2.1.0 で追加。VISA resource を `open_resource` → 属性読取 → `close`
+**だけ**で疎通確認する。`*IDN?` / `query` / `write` は絶対に送らない
+ため、`identify_instrument` より前段の安全な健全性チェックに使える。
+構造化 error (`error_class` / `code` / `message`) を返す。
+
 ## 提供される MCP ツール（50 個 / raw 系 2 個は別途オプトイン）
 
 ### 識別・情報
 
 | ツール | 用途 |
 |-------|------|
-| `list_resources` | 接続中の VISA リソースを列挙 |
+| `list_resources` | 接続中の VISA リソースを列挙 (`query="USB?*"` 等で interface 別絞込) |
+| `probe_resource` ★v2.1 新規 | `*IDN?` を送らず open/close だけで疎通確認 |
+| `discover_resources_safe` ★v2.1 新規 | interface ごとに個別 list_resources、一部失敗でも部分成功を返す |
 | `identify_instrument` | `*IDN?` で機器を識別し定義をバインド |
-| `identify_all_instruments` | 全リソースを一括識別 |
+| `identify_all_instruments` | 全リソースを一括識別 (`query="USB?*"` で絞込可、v2.1) |
 | `list_identified_instruments` | 既に識別済みのセッション一覧 |
 | `bind_definition` | `*IDN?` 非対応機器に定義を手動バインド |
 | `list_available_definitions` | ロード済みの YAML 定義一覧 |

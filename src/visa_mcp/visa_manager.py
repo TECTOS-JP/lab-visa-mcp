@@ -157,6 +157,176 @@ class VisaManager:
             async with self._get_lock(resource_name):
                 await self._run(_write)
 
+    async def probe_resource(
+        self,
+        resource_name: str,
+        timeout_ms: int = 3000,
+    ) -> dict:
+        """v2.1.0: VISA resource を open/close するだけの安全な probe。
+
+        **`*IDN?` / `query` / `write` は一切送らない**。open / 属性
+        読み取り / close まで。VI_ERROR_SYSTEM_ERROR 等の structured
+        error を返す。
+
+        Returns:
+            success / error 構造を含む dict。raise しない。
+        """
+        result: dict = {
+            "success": False,
+            "data": {
+                "operation": "open_close_only",
+                "resource_name": resource_name,
+                "opened": False,
+                "closed": False,
+                "query_performed": False,
+                "write_performed": False,
+                "timeout_ms": timeout_ms,
+            },
+        }
+
+        def _probe():
+            rm = self._get_rm()
+            res = None
+            try:
+                res = rm.open_resource(resource_name)
+                opened = True
+                interface_type = None
+                resource_class = None
+                try:
+                    res.timeout = timeout_ms
+                except Exception:
+                    pass
+                try:
+                    interface_type = getattr(res, "interface_type", None)
+                except Exception:
+                    interface_type = None
+                try:
+                    resource_class = getattr(res, "resource_class", None)
+                except Exception:
+                    resource_class = None
+                return {
+                    "opened": opened,
+                    "interface_type": interface_type,
+                    "resource_class": resource_class,
+                }
+            finally:
+                if res is not None:
+                    try:
+                        res.close()
+                        result["data"]["closed"] = True
+                    except Exception:
+                        pass
+
+        try:
+            info = await self._run(_probe)
+            result["success"] = True
+            result["data"]["opened"] = bool(info.get("opened"))
+            result["data"]["interface_type"] = info.get("interface_type")
+            result["data"]["resource_class"] = info.get("resource_class")
+        except Exception as e:
+            # structured error。pyvisa.errors.VisaIOError があれば code
+            # を含める
+            err = {
+                "error_class": "visa_open_resource_failed",
+                "type": type(e).__name__,
+                "message": str(e),
+            }
+            code = getattr(e, "error_code", None)
+            if code is None and hasattr(e, "args") and e.args:
+                # __cause__ 経由のことが多い
+                cause = getattr(e, "__cause__", None)
+                if cause is not None:
+                    code = getattr(cause, "error_code", None)
+            if code is not None:
+                err["code"] = int(code)
+            result["error"] = err
+        return result
+
+    async def discover_resources_safe(
+        self,
+        queries: list[str] | None = None,
+    ) -> dict:
+        """v2.1.0: query ごとに `list_resources` を個別実行し、
+        部分成功を返す。一部 interface (例: GPIB) が異常でも、
+        他 (USB) の結果は捨てない。
+        """
+        if not queries:
+            queries = ["USB?*", "GPIB?*", "ASRL?*", "TCPIP?*"]
+
+        def _interface_of(q: str) -> str:
+            q_upper = q.upper()
+            for prefix in ("USB", "GPIB", "TCPIP", "ASRL", "PXI",
+                            "VXI", "FIREWIRE"):
+                if q_upper.startswith(prefix):
+                    return prefix
+            return q_upper
+
+        per_query: list[dict] = []
+        all_resources: list[dict] = []
+        successful: list[str] = []
+        failed: list[str] = []
+
+        for q in queries:
+            iface = _interface_of(q)
+            entry: dict = {
+                "query": q, "interface": iface,
+                "success": False, "resources": [], "error": None,
+            }
+            try:
+                resources = await self.list_resources(q)
+                entry["success"] = True
+                entry["resources"] = list(resources)
+                successful.append(iface)
+                for r in resources:
+                    all_resources.append({
+                        "resource_name": r, "query": q,
+                        "interface": iface,
+                    })
+            except Exception as e:
+                err = {
+                    "error_class": "visa_interface_discovery_failed",
+                    "type": type(e).__name__,
+                    "message": str(e),
+                }
+                cause = getattr(e, "__cause__", None)
+                code = getattr(cause, "error_code", None) \
+                    if cause else None
+                if code is not None:
+                    err["code"] = int(code)
+                entry["error"] = err
+                failed.append(iface)
+            per_query.append(entry)
+
+        any_success = bool(successful)
+        any_failure = bool(failed)
+        partial = any_success and any_failure
+
+        recommended: list[str] = []
+        if any_failure:
+            recommended.append(
+                "Try list_resources(query=\"USB?*\") to isolate USB "
+                "resources.")
+            if "GPIB" in failed:
+                recommended.append(
+                    "Check NI-488.2 / GPIB controller if GPIB "
+                    "discovery fails.")
+            recommended.append(
+                "Check NI MAX for the failing interface.")
+            recommended.append(
+                "Run pyvisa-info and verify the active VISA backend.")
+
+        return {
+            "success": any_success,
+            "partial_success": partial,
+            "data": {
+                "resources": all_resources,
+                "queries": per_query,
+                "successful_interfaces": successful,
+                "failed_interfaces": failed,
+            },
+            "recommended_next_actions": recommended,
+        }
+
     def close(self) -> None:
         if self._rm is not None:
             try:
