@@ -1,5 +1,42 @@
 # 変更履歴
 
+## v2.3.1 — Codex v2.2.1 レビュー対応 (resolver 副作用分離 + fixture)
+
+合言葉: **「resolver test に server import は要らない」**
+
+### Codex v2.2.1 レビュー指摘
+
+> `visa_mcp.server` の resolver テストは server module 全体 import を
+> 避け、resolver を副作用のない module に分離する。
+
+`from visa_mcp import server` すると JobManager / JobStore まで初期化
+されるため、resolver 単体テストとしては副作用が大きかった。
+
+### 修正
+
+- 新規 `src/visa_mcp/instruments_dir.py`:
+  - `resolve_instruments_dir(server_file)` を純粋関数化
+  - import しても外部状態を変更しない
+- `server.py` は新 module から re-export (`_resolve_instruments_dir`
+  名は後方互換のため残す)
+- `tests/test_v2_2_1_review.py`:
+  - resolver test は `from visa_mcp.instruments_dir import
+    resolve_instruments_dir` に変更
+  - server module を import しなくなり、テスト副作用ゼロ
+- shared fixtures (`conftest.py`):
+  - `job_store` — `JobStore(tmp_path)` を yield、teardown で `close()`
+  - `seed_job` — completed job row INSERT helper
+- 既存テスト (`test_v2_2_1_review.py` / `test_v2_1_2_results_integration.py`)
+  を fixture ベースに refactor
+- 依存: `lab-executor-mcp>=2.14.2,<3.0.0`
+
+### 互換性
+
+完全後方互換。`server._resolve_instruments_dir()` は wrapper として
+残るため、既存 import path は壊れない。lab-executor v2.14.2 と組で
+release。
+
+
 ## v2.3.0 — bindings / identified state の永続化 (process 再起動耐性)
 
 合言葉: **「bind_definition は一度きり」**

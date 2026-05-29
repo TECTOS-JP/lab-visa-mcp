@@ -30,70 +30,25 @@ logging.basicConfig(
     stream=sys.stderr,
 )
 
-def _resolve_instruments_dir() -> Path:
-    """v2.1.4: instrument YAML 定義のロード先を優先順で決定する。
-
-    優先順 (v2.1.5 で順序確定):
-      1. `$VISA_MCP_INSTRUMENTS_DIR` 環境変数 (運用上書き)
-      2. `<repo>/instruments` (利用者の運用配置 / `_system.yaml`)
-      3. `<repo>/examples/instruments` (開発リポジトリのサンプル)
-      4. `<pkg>/builtin_instruments` (wheel 同梱、最後の fallback)
-
-    注: 2 と 3 の判定では `_*.yaml` のみのディレクトリは「instrument
-    YAML 無し」として skip するため、`<repo>/instruments` に
-    `_system.example.yaml` / `_template.yaml` しか無い場合は 3 へ進む。
-
-    v2.1.3 までは 2 のみだったため、`pip install visa-mcp` 後に
-    `visa-mcp serve` を起動すると YAML 0 件 load で詰まっていた。
-    v2.1.4 で同梱 `builtin_instruments` を最終 fallback とすることで
-    手動 YAML コピー無しでも動くようにする。
-    """
-    env = os.environ.get("VISA_MCP_INSTRUMENTS_DIR", "").strip()
-    if env:
-        p = Path(env).expanduser()
-        if p.is_dir():
-            return p
-        logger.warning(
-            "VISA_MCP_INSTRUMENTS_DIR=%s は存在しません。fallback 探索に移ります", env)
-    here = Path(__file__).resolve()
-    repo_root = here.parent.parent.parent
-    # v2.1.6: wheel install 環境で `<venv>\Lib\instruments` を
-    # dev repo の `<repo>/instruments` と誤検出する問題を回避する。
-    # `<repo>/pyproject.toml` がある場合のみ dev リポジトリとみなす。
-    # `<venv>\Lib` には pyproject.toml が無いため builtin に正しく落ちる。
-    is_dev_repo = (repo_root / "pyproject.toml").is_file()
-
-    # 「instrument YAML」は `_` 始まりでない (= _system.yaml /
-    # _template.yaml 等の system/template ファイルを除く) yaml を
-    # 1 件以上含むディレクトリ、と定義する。
-    def _has_instrument_yaml(d: Path) -> bool:
-        if not d.is_dir():
-            return False
-        return any(
-            p.name and not p.name.startswith("_")
-            for p in d.glob("*.yaml")
-        )
-
-    if is_dev_repo:
-        # v2.1.5: 利用者の運用配置 (`<repo>/instruments`) を最優先する。
-        # ここに `_system.yaml` + カスタム instrument YAML を置く運用が
-        # 既に存在する。次に開発リポジトリの `examples/instruments`、
-        # 最後に wheel 同梱 `builtin_instruments` の順。
-        for cand in (
-            repo_root / "instruments",                # 運用配置 (利用者)
-            repo_root / "examples" / "instruments",   # 開発リポジトリ
-        ):
-            if _has_instrument_yaml(cand):
-                return cand
-    # wheel-installed default
-    builtin = here.parent / "builtin_instruments"
-    if builtin.is_dir():
-        return builtin
-    # 見つからなければ builtin の path を返す (registry 側で 0 件 + warn)
-    return builtin
-
-
 logger = logging.getLogger(__name__)
+
+# v2.3.1: resolver を `visa_mcp.instruments_dir` に切り出した。
+# Codex v2.2.1 レビュー指摘: `from visa_mcp import server` すると
+# JobManager / JobStore まで初期化されるため、resolver の単体テストが
+# 副作用を持っていた。新 module は import しても外部状態を変更しない。
+# 後方互換のためここから `_resolve_instruments_dir()` を再エクスポート。
+from visa_mcp.instruments_dir import (
+    resolve_instruments_dir as _resolve_impl,
+)
+
+
+def _resolve_instruments_dir() -> Path:
+    """Backward-compatible wrapper.
+    v2.3.1+ は `visa_mcp.instruments_dir.resolve_instruments_dir` を
+    直接 import するのが推奨。"""
+    return _resolve_impl(__file__)
+
+
 INSTRUMENTS_DIR = _resolve_instruments_dir()
 
 _safety_mode = sf.get_safety_mode()

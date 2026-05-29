@@ -30,27 +30,28 @@ def test_resolver_ignores_venv_instruments_without_pyproject(
 ):
     """wheel install 環境を模擬: <venv>/Lib に instruments/ がある
     が pyproject.toml が無い場合、resolver は dev path を無視して
-    builtin に落ちる。"""
+    builtin に落ちる。
+
+    v2.3.1: resolver は `visa_mcp.instruments_dir` の純粋関数に切り
+    出されたので、server module 全体を import せずに直接呼べる
+    (Codex v2.2.1 レビュー対応 #2)。
+    """
     fake_venv_lib = tmp_path / "Lib"
     sp = fake_venv_lib / "site-packages" / "visa_mcp"
     sp.mkdir(parents=True)
     fake_server = sp / "server.py"
     fake_server.write_text("# fake", encoding="utf-8")
-    # `<venv>/Lib/instruments/` に古い YAML を置く (誤検出させる罠)
     stale_instr = fake_venv_lib / "instruments"
     stale_instr.mkdir(parents=True)
     (stale_instr / "stale_dmm.yaml").write_text(
         "metadata: {}", encoding="utf-8")
-    # pyproject.toml は無い (= wheel install 環境)
     assert not (fake_venv_lib / "pyproject.toml").exists()
 
-    from visa_mcp import server as srv_mod
-    monkeypatch.setattr(srv_mod, "__file__", str(fake_server))
+    from visa_mcp.instruments_dir import resolve_instruments_dir
     monkeypatch.delenv("VISA_MCP_INSTRUMENTS_DIR", raising=False)
-    resolved = srv_mod._resolve_instruments_dir()
-    # stale 側ではなく builtin (本物の同梱 path) に落ちるはず
+    resolved = resolve_instruments_dir(str(fake_server))
     assert resolved != stale_instr, (
-        f"v2.2.1: wheel install で <venv>/Lib/instruments を拾ってる: "
+        f"v2.3.1: wheel install で <venv>/Lib/instruments を拾ってる: "
         f"{resolved}")
 
 
@@ -70,10 +71,9 @@ def test_resolver_uses_repo_instruments_when_pyproject_present(
     fake_server = sp / "server.py"
     fake_server.write_text("# fake", encoding="utf-8")
 
-    from visa_mcp import server as srv_mod
-    monkeypatch.setattr(srv_mod, "__file__", str(fake_server))
+    from visa_mcp.instruments_dir import resolve_instruments_dir
     monkeypatch.delenv("VISA_MCP_INSTRUMENTS_DIR", raising=False)
-    resolved = srv_mod._resolve_instruments_dir()
+    resolved = resolve_instruments_dir(str(fake_server))
     assert resolved == instr
 
 
@@ -109,22 +109,12 @@ def test_builtin_7563_yaml_loose_pattern_accepts_jppc():
 # ==============================================================
 
 
-def _seed_job(store: JobStore, job_id: str) -> None:
-    store._connect().execute(
-        "INSERT INTO jobs (job_id, owner, resource_name, status, "
-        "current_step_index, created_at, updated_at) "
-        "VALUES (?, '', '', 'completed', 0, '2026-01-01T00:00:00Z', "
-        "'2026-01-01T00:00:00Z')",
-        (job_id,),
-    )
-
-
-def test_visa_mcp_export_skips_parsed_metadata(tmp_path):
-    store = JobStore(str(tmp_path / "t.db"))
+def test_visa_mcp_export_skips_parsed_metadata(job_store, seed_job):
+    """v2.3.1: fixture を使い teardown で close される。"""
     job_id = "job_v2_2_1_metadata"
-    _seed_job(store, job_id)
-    row_id = store.record_step_started(job_id, 0, "command")
-    store.record_step_completed(
+    seed_job(job_store, job_id)
+    row_id = job_store.record_step_started(job_id, 0, "command")
+    job_store.record_step_completed(
         row_id, status="ok",
         result={
             "command": "read_measurement",
@@ -139,14 +129,13 @@ def test_visa_mcp_export_skips_parsed_metadata(tmp_path):
             "success": True,
         },
     )
-    mgr = MagicMock(); mgr.store = store
+    mgr = MagicMock(); mgr.store = job_store
     rows = _extract_result_rows(mgr, job_id)
     measurements = {r["measurement"] for r in rows}
     assert "matched" not in measurements
     assert "fields" not in measurements
     assert "raw" not in measurements
     assert "fallback_used" not in measurements
-    # value_numeric は cmd_name 接頭辞で残るべき
     assert any("value_numeric" in m for m in measurements), measurements
 
 

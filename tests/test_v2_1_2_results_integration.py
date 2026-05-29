@@ -5,37 +5,26 @@ Codex 実機 E2E (v2.1.1) で発覚: lab-executor-mcp 側を v2.13.2 で
 修正しても、visa-mcp の MCP server が登録するのは
 `visa_mcp.tools.export` の **独自コピー** であり、こちらは依然
 旧名 `response_raw` しか読まなかったため rows=0 が再発した。
+
+v2.3.1: fixtures (`job_store`, `seed_job`) に refactor。
 """
 from __future__ import annotations
-from pathlib import Path
 from unittest.mock import MagicMock
 
-from lab_executor.job.store import JobStore  # visa_mcp.job shim 経由でも OK
 from visa_mcp.tools.export import _extract_result_rows
 
 
-def _mgr_with_store(store: JobStore):
+def _mgr_with_store(store):
     mgr = MagicMock()
     mgr.store = store
     return mgr
 
 
-def _seed_job(store: JobStore, job_id: str) -> None:
-    store._connect().execute(
-        "INSERT INTO jobs (job_id, owner, resource_name, status, "
-        "current_step_index, created_at, updated_at) "
-        "VALUES (?, '', '', 'completed', 0, '2026-01-01T00:00:00Z', "
-        "'2026-01-01T00:00:00Z')",
-        (job_id,),
-    )
-
-
-def test_visa_mcp_export_reads_raw_response(tmp_path: Path):
-    store = JobStore(str(tmp_path / "results.db"))
+def test_visa_mcp_export_reads_raw_response(job_store, seed_job):
     job_id = "job_visa_mcp_v2_1_2"
-    _seed_job(store, job_id)
-    row_id = store.record_step_started(job_id, 0, "command")
-    store.record_step_completed(
+    seed_job(job_store, job_id)
+    row_id = job_store.record_step_started(job_id, 0, "command")
+    job_store.record_step_completed(
         row_id, status="ok",
         result={
             "command": "measure_voltage",
@@ -44,7 +33,7 @@ def test_visa_mcp_export_reads_raw_response(tmp_path: Path):
             "success": True,
         },
     )
-    rows = _extract_result_rows(_mgr_with_store(store), job_id)
+    rows = _extract_result_rows(_mgr_with_store(job_store), job_id)
     assert len(rows) == 1, (
         f"v2.1.2: visa-mcp 側 export shim も raw_response を読むべき "
         f"(rows={len(rows)})")
@@ -52,12 +41,11 @@ def test_visa_mcp_export_reads_raw_response(tmp_path: Path):
     assert rows[0]["value"] == "+1.234E+00"
 
 
-def test_visa_mcp_export_reads_parsed_alias(tmp_path: Path):
-    store = JobStore(str(tmp_path / "results2.db"))
+def test_visa_mcp_export_reads_parsed_alias(job_store, seed_job):
     job_id = "job_visa_mcp_parsed"
-    _seed_job(store, job_id)
-    row_id = store.record_step_started(job_id, 0, "command")
-    store.record_step_completed(
+    seed_job(job_store, job_id)
+    row_id = job_store.record_step_started(job_id, 0, "command")
+    job_store.record_step_completed(
         row_id, status="ok",
         result={
             "command": "measure_voltage",
@@ -66,21 +54,21 @@ def test_visa_mcp_export_reads_parsed_alias(tmp_path: Path):
             "success": True,
         },
     )
-    rows = _extract_result_rows(_mgr_with_store(store), job_id)
-    assert len(rows) >= 2
-    assert {r["measurement"] for r in rows} >= {"value", "unit"}
+    rows = _extract_result_rows(_mgr_with_store(job_store), job_id)
+    # v2.14.1+ では metadata key (unit が str なので除外、value のみ)
+    measurements = {r["measurement"] for r in rows}
+    assert any("value" in m for m in measurements), measurements
 
 
-def test_visa_mcp_export_legacy_keys_still_work(tmp_path: Path):
-    store = JobStore(str(tmp_path / "results_legacy.db"))
+def test_visa_mcp_export_legacy_keys_still_work(job_store, seed_job):
     job_id = "job_visa_mcp_legacy"
-    _seed_job(store, job_id)
-    row_id = store.record_step_started(job_id, 0, "command")
-    store.record_step_completed(
+    seed_job(job_store, job_id)
+    row_id = job_store.record_step_started(job_id, 0, "command")
+    job_store.record_step_completed(
         row_id, status="ok",
         result={"command": "old_cmd", "response_raw": "L", "success": True},
     )
-    rows = _extract_result_rows(_mgr_with_store(store), job_id)
+    rows = _extract_result_rows(_mgr_with_store(job_store), job_id)
     assert len(rows) == 1
     assert rows[0]["value"] == "L"
 
