@@ -158,21 +158,34 @@ def register_tools(mcp: FastMCP, session_mgr: SessionManager) -> None:
         (または VISA_MCP_SESSION_STORE) からも除去する。同時に
         in-memory session も clear する。
 
+        v2.3.2: removed の判定を in-memory と store の OR で行う
+        (Codex v2.3.1 レビュー P2)。definition 不在で restore skip
+        された record も「store にあれば削除」されることを反映する。
+
         Args:
             resource_name: 削除する VISA resource (例: "GPIB0::2::INSTR")
 
         Returns:
-            data.removed: bool (削除した場合 True)
+            data.removed: bool (in-memory または store に存在して削除した場合 True)
+            data.removed_from_in_memory: bool
+            data.removed_from_store: bool
             data.resource_name: 対象 resource
-            data.remaining_sessions: 現在残っている session 数
+            data.remaining_sessions: 現在残っている in-memory session 数
         """
-        existed_before = session_mgr.get_session(resource_name) is not None
+        in_mem_existed = (
+            session_mgr.get_session(resource_name) is not None)
+        store = session_mgr.store
+        store_existed = (
+            store is not None
+            and store.get(resource_name) is not None)
+        existed_anywhere = in_mem_existed or store_existed
         session_mgr.clear_session(resource_name)
-        # clear_session が store 連動するので、ここでは結果だけ返す
         return {
             "success": True,
             "data": {
-                "removed": existed_before,
+                "removed": existed_anywhere,
+                "removed_from_in_memory": in_mem_existed,
+                "removed_from_store": store_existed,
                 "resource_name": resource_name,
                 "remaining_sessions": len(session_mgr.list_sessions()),
             },
@@ -259,13 +272,26 @@ def register_tools(mcp: FastMCP, session_mgr: SessionManager) -> None:
         """
         instruments/ フォルダの YAML 定義ファイルを再読み込みする。
         新しい機器定義ファイルを追加した後に呼び出す。
+
+        v2.3.2: persisted bindings (~/.visa-mcp/sessions.json) は
+        保持される。reload 後 in-memory session を捨てて新 definition
+        で store から再 restore する。100 台規模で reload しても
+        保存済み binding は失われない (Codex v2.3.1 レビュー P1)。
         """
         count = session_mgr._registry.reload()
-        session_mgr.clear_all()
+        before = len(session_mgr.list_sessions())
+        session_mgr.reload_in_memory_sessions()
+        after = len(session_mgr.list_sessions())
         return {
             "success": True,
             "data": {
-                "message": f"{count} 件の定義を再ロードしました。識別済みセッションはクリアされました。",
+                "message": (
+                    f"{count} 件の定義を再ロードしました。"
+                    f"persisted bindings は保持されました "
+                    f"(before={before}, restored={after})。"
+                ),
                 "definition_count": count,
+                "sessions_before_reload": before,
+                "sessions_after_reload": after,
             },
         }

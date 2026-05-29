@@ -214,12 +214,32 @@ class SessionManager:
                 logger.warning("clear_session の persist 失敗: %s", e)
 
     def clear_all(self) -> None:
+        """**全 binding を消す** (in-memory + persisted store)。
+
+        通常運用ではほぼ呼ばない (admin/test 用)。
+        定義 YAML reload のように in-memory だけ捨てたい場合は
+        `reload_in_memory_sessions()` を使うこと (v2.3.2)。
+        """
         self._sessions.clear()
         if self._store is not None:
             try:
                 self._store.clear_all()
             except Exception as e:
                 logger.warning("clear_all の persist 失敗: %s", e)
+
+    def clear_in_memory(self) -> None:
+        """v2.3.2: persisted store を残したまま in-memory session 辞書
+        だけクリアする。definition YAML reload 時の用途。"""
+        self._sessions.clear()
+
+    def reload_in_memory_sessions(self) -> None:
+        """v2.3.2: definition reload 後に in-memory session を捨てて
+        store から再 restore する。新しい definition で binding が
+        更新される。persisted store の record は触らない。
+        """
+        self._sessions.clear()
+        if self._store is not None:
+            self._restore_from_store()
 
     # v2.3.0: store accessor (for tests / advanced ops)
     @property

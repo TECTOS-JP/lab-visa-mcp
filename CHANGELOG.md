@@ -1,5 +1,56 @@
 # 変更履歴
 
+## v2.3.2 — Codex v2.3.1 レビュー対応 (reload 保護 + removed 判定 + multi-process lock)
+
+合言葉: **「YAML reload で persisted bindings は消えない」**
+
+### Codex v2.3.1 レビュー指摘 (P1 + P2 × 2)
+
+| # | 指摘 | 対応 |
+|---|------|------|
+| **P1** | `reload_definitions()` が `session_mgr.clear_all()` を呼んで persisted bindings まで消す。100 台規模で YAML reload しただけで保存済み binding 全消去 | `SessionManager.reload_in_memory_sessions()` を追加。reload_definitions はそれを呼ぶ。persisted bindings は触らず、reload 後 store から再 restore |
+| **P2-a** | `clear_persisted_binding` の `removed` を in-memory session の有無で判定。store にだけ残った record (definition 不在で restore skip) を削除しても `removed=false` になる | in-memory OR store の OR で判定。`removed_from_in_memory` / `removed_from_store` も別フィールドで返す |
+| **P2-b** | SessionStore に multi-process 排他なし。複数 agent / 複数 server で同じ `sessions.json` を更新すると lost update | cross-platform file lock (`msvcrt.locking` on Windows / `fcntl.flock` on POSIX) + read-modify-write pattern。timeout 5 秒、best-effort fallback |
+
+### 修正
+
+- `SessionManager`:
+  - `clear_in_memory()` 新設 (store を触らず in-memory のみクリア)
+  - `reload_in_memory_sessions()` 新設 (in-memory 捨てて store から再 restore)
+  - `clear_all()` は明示 admin 用として継続 (store も消す)
+- `discovery.reload_definitions()`:
+  - `clear_all()` → `reload_in_memory_sessions()` に変更
+  - response に `sessions_before_reload` / `sessions_after_reload` を追加
+- `discovery.clear_persisted_binding()`:
+  - `removed` 判定を in-memory OR store の OR に
+  - `removed_from_in_memory` / `removed_from_store` を別フィールドで返す
+- `SessionStore`:
+  - `_file_lock(lock_path, timeout_s)` context manager 追加
+  - upsert / touch / remove / clear_all を `read → modify → write`
+    の atomic 操作に書き換え (lost update 防止)
+  - `_save_locked()` 内部関数 (ロック取得済み前提の save)
+  - `.lock` sidecar file が `~/.visa-mcp/sessions.json.lock` に出現
+- 依存: `lab-executor-mcp>=2.14.3,<3.0.0`
+- 9 件 test 追加 (`test_v2_3_2_review.py`):
+  - reload は store を消さない / restore で復活
+  - clear_in_memory は store を消さない
+  - clear_all は store も消す (admin)
+  - store-only ghost record の clear で removed=true
+  - 2 thread 並行 upsert で lost update なし (file lock)
+  - 別 SessionStore インスタンスからの remove は disk 再読込
+
+### 既知の制約
+
+- file lock は best-effort (`msvcrt`/`fcntl` 無い環境では in-process
+  thread lock のみ)。NFS / SMB 上は flock の挙動 OS 依存。
+- timeout 5 秒で諦めて save する。logger.warning で通知。
+
+### 互換性
+
+完全後方互換。MCP tool 名・引数は不変、response に新フィールド追加のみ。
+lab-executor v2.14.3 と組で release。
+
+
 ## v2.3.1 — Codex v2.2.1 レビュー対応 (resolver 副作用分離 + fixture)
 
 合言葉: **「resolver test に server import は要らない」**
