@@ -14,4 +14,4 @@ v2.0 で実験実行 runtime / DSL / extension ecosystem は
 詳細: `docs/v2_migration.md` / `docs/raw_visa.md`
 """
 
-__version__ = "2.1.4"
+__version__ = "2.1.5"

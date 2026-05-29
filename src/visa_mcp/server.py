@@ -32,11 +32,15 @@ logging.basicConfig(
 def _resolve_instruments_dir() -> Path:
     """v2.1.4: instrument YAML 定義のロード先を優先順で決定する。
 
-    優先順:
+    優先順 (v2.1.5 で順序確定):
       1. `$VISA_MCP_INSTRUMENTS_DIR` 環境変数 (運用上書き)
-      2. `<repo>/instruments` (旧来パス、開発時の `_system.yaml` 用)
-      3. `<repo>/examples/instruments` (開発リポジトリ)
+      2. `<repo>/instruments` (利用者の運用配置 / `_system.yaml`)
+      3. `<repo>/examples/instruments` (開発リポジトリのサンプル)
       4. `<pkg>/builtin_instruments` (wheel 同梱、最後の fallback)
+
+    注: 2 と 3 の判定では `_*.yaml` のみのディレクトリは「instrument
+    YAML 無し」として skip するため、`<repo>/instruments` に
+    `_system.example.yaml` / `_template.yaml` しか無い場合は 3 へ進む。
 
     v2.1.3 までは 2 のみだったため、`pip install visa-mcp` 後に
     `visa-mcp serve` を起動すると YAML 0 件 load で詰まっていた。
@@ -63,9 +67,13 @@ def _resolve_instruments_dir() -> Path:
             for p in d.glob("*.yaml")
         )
 
+    # v2.1.5: 利用者の運用配置 (`<repo>/instruments`) を最優先する。
+    # ここに `_system.yaml` + カスタム instrument YAML を置く運用が
+    # 既に存在する。次に開発リポジトリの `examples/instruments`、
+    # 最後に wheel 同梱 `builtin_instruments` の順。
     for cand in (
-        repo_root / "examples" / "instruments",  # 開発リポジトリ優先
-        repo_root / "instruments",
+        repo_root / "instruments",                # 運用配置 (利用者)
+        repo_root / "examples" / "instruments",   # 開発リポジトリ
     ):
         if _has_instrument_yaml(cand):
             return cand

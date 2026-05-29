@@ -1,45 +1,16 @@
-# v0.6.0: System topology configuration (EXAMPLE)
+# v2.1.5: builtin (wheel-shipped) _system.yaml は空でリリースする。
 #
-# このファイルを `_system.yaml` (拡張子前のドット無し) として配置すると、
-# instrument alias / bus 制限 / instrument_groups / experiment_units が
-# 有効になる。ファイルが無くてもサーバは起動する (v0.5 系互換)。
+# v2.1.4 では `_system.example.yaml` を流用していたため、wheel
+# fallback が選択された環境で架空 alias / group / unit
+# (psu001 → GPIB0::6::INSTR 等) が production API に出てしまう
+# 問題があった。
 #
-# - instruments: 短縮名 (alias) ↔ VISA resource_name の対応 + 物理 bus 帰属
-# - buses: バス単位の同時アクセス制限 (GPIB は default 1)
-# - instrument_groups: 同種機器の集合 (start_group_query_job)
-# - experiment_units: 1 つの実験対象の機器セット (start_map_recipe_job)
+# 利用者は v2.1.5 以降、運用環境で alias / bus / group / unit を
+# 使いたい場合のみ `<repo>/instruments/_system.yaml` か
+# `VISA_MCP_INSTRUMENTS_DIR/_system.yaml` を作成する。
+# 雛形例は repository の `instruments/_system.example.yaml` を参照。
 
-instruments:
-  psu001:
-    resource: "GPIB0::6::INSTR"
-    bus: "GPIB0"
-    description: "Kikusui PMX35-3A unit 1"
-  temp001:
-    resource: "GPIB0::1::INSTR"
-    # bus 未指定 → resource から自動推定で "GPIB0"
-    description: "Yokogawa 7563 unit 1"
-  # psu002, temp002, ... (実環境に応じて拡張)
-
-buses:
-  GPIB0:
-    max_concurrency: 1     # GPIB は同時 1 通信が安全 (default)
-    description: "Primary GPIB bus"
-  # usb_hub_1: { max_concurrency: 8 }
-  # lan_segment_1: { max_concurrency: 50 }
-
-instrument_groups:
-  temp_meters:
-    members: [temp001]      # 拡張: [temp001, temp002, ..., temp100]
-    description: "All thermocouple meters"
-  power_supplies:
-    members: [psu001]
-    description: "All DC power supplies"
-
-experiment_units:
-  unit001:
-    psu: psu001
-    temp: temp001
-    description: "Sample slot 1"
-  # unit002:
-  #   psu: psu002
-  #   temp: temp002
+instruments: {}
+buses: {}
+instrument_groups: {}
+experiment_units: {}

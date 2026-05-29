@@ -1,5 +1,43 @@
 # 変更履歴
 
+## v2.1.5 — Codex レビュー反映 (builtin _system 安全化 + resolver 順序確定 + 実 wheel 検証)
+
+合言葉: **「example を fallback default にしない」**
+
+### v2.1.4 への 3 件レビュー指摘 (Codex)
+
+| 優先度 | 内容 | 対応 |
+|--------|------|------|
+| **P1-a** | builtin `_system.yaml` が EXAMPLE 内容のまま wheel 同梱され、`psu001=GPIB0::6::INSTR` 等の架空 alias / group / unit が production API に出る | builtin `_system.yaml` を空 (instruments/buses/instrument_groups/experiment_units すべて `{}`) で同梱に変更 |
+| **P1-b** | resolver 実装が docstring と逆順 (`examples/instruments` を先に見ていた) | 順序を docstring 通り `<repo>/instruments` 優先に修正。docstring も更新 |
+| **P2** | fallback test が `Path` 戻り値しか見ておらず builtin が選ばれた・実際に load される・wheel に同梱される、が verify されていない | 実 `InstrumentRegistry` ロード assert + `python -m build` で wheel を作り `visa_mcp/builtin_instruments/*.yaml` の同梱を assert (PMX / 7563 / `_system.yaml`) |
+
+### 修正
+
+- `src/visa_mcp/builtin_instruments/_system.yaml`: 全 mapping を空に
+- `src/visa_mcp/server.py:_resolve_instruments_dir()`:
+  - 順序を `<repo>/instruments` → `<repo>/examples/instruments` →
+    builtin に確定
+  - docstring を実装に合わせて更新
+- `tests/test_v2_1_5_packaging.py` (新規 7 件):
+  - builtin `_system.yaml` に架空 alias が無いこと
+  - resolver が `instruments/` を `examples/instruments` より優先
+  - `_*.yaml` のみのディレクトリを skip して次に進む
+  - dev path 不在時に builtin から実 instrument が load される
+    (PMX/7563 を検出)
+  - `python -m build --wheel` で wheel を作り、その中に
+    `visa_mcp/builtin_instruments/{pmx,7563,_system}.yaml` を
+    検出 (CI で `build` パッケージ未導入なら skip)
+
+### 互換性
+
+完全後方互換。Stable / Experimental tool API は不変。
+既存の `<repo>/instruments/_system.yaml` を使った運用は引き続き
+最優先で読まれる。
+
+Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>
+
+
 ## v2.1.4 — wheel に builtin_instruments を同梱 + INSTRUMENTS_DIR resolver
 
 合言葉: **「`pip install visa-mcp` 直後に YAML 0 件にならない」**

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "visa-mcp"
-version = "2.1.4"
+version = "2.1.5"
 description = "PyVISA backend + compatibility shim for lab-executor-mcp. Hardware (GPIB / USB / Serial / LAN) communication layer."
 readme = "README.md"
 license = { text = "MIT" }
