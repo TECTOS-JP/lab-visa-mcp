@@ -70,67 +70,79 @@ else:
     _HAS_MSVCRT = False
 
 
+class SessionStoreLockTimeout(RuntimeError):
+    """v2.3.3: file lock acquisition timed out.
+
+    Codex v2.3.2 レビュー P1: 旧実装は timeout 後も warning だけ出して
+    write を続行していたため multi-process safety が壊れていた。
+    v2.3.3 では明示例外を上げ、mutating ops 側で write をスキップする
+    (in-memory のみ更新 / log warning) ように変更。
+    """
+
+
 @contextlib.contextmanager
 def _file_lock(lock_path: Path, timeout_s: float = 5.0):
     """exclusive advisory lock on `lock_path`. Cross-process safe.
 
     Windows: msvcrt.locking on a sidecar `.lock` file (LK_NBLCK +
              busy-wait retry until timeout).
-    POSIX:   fcntl.flock with LOCK_EX (blocking with timeout).
-    fallback: in-process threading.Lock only (best-effort).
+    POSIX:   fcntl.flock with LOCK_EX | LOCK_NB + busy-wait retry.
+    fallback: lock 機構が無い環境では yield する (in-process thread
+              lock のみで best-effort)。
+
+    v2.3.3: timeout 時は `SessionStoreLockTimeout` を raise する。
+    `_HAS_MSVCRT` / `_HAS_FCNTL` どちらも無い環境では timeout 判定を
+    行わず、そのまま yield する (in-process lock のみ)。
     """
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     deadline = time.monotonic() + timeout_s
     fh = None
+    acquired = False
     try:
-        # open or create the lock file
         fh = open(lock_path, "ab+")
         if _HAS_MSVCRT:
             while True:
                 try:
-                    # Lock just 1 byte at offset 0 (file may be empty)
                     fh.seek(0)
                     msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+                    acquired = True
                     break
                 except OSError:
                     if time.monotonic() >= deadline:
-                        logger.warning(
-                            "session store lock timeout (%.1fs): %s",
-                            timeout_s, lock_path)
-                        break
+                        raise SessionStoreLockTimeout(
+                            f"session store lock timeout ({timeout_s:.1f}s): "
+                            f"{lock_path}")
                     time.sleep(0.05)
         elif _HAS_FCNTL:
-            try:
-                # Use non-blocking lock with busy-wait so we honor timeout
-                while True:
-                    try:
-                        fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-                        break
-                    except (BlockingIOError, OSError):
-                        if time.monotonic() >= deadline:
-                            logger.warning(
-                                "session store lock timeout (%.1fs): %s",
-                                timeout_s, lock_path)
-                            break
-                        time.sleep(0.05)
-            except Exception as e:
-                logger.warning("fcntl lock failed: %s", e)
-        # else: no cross-process lock available; just rely on in-process
+            while True:
+                try:
+                    fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    acquired = True
+                    break
+                except (BlockingIOError, OSError):
+                    if time.monotonic() >= deadline:
+                        raise SessionStoreLockTimeout(
+                            f"session store lock timeout ({timeout_s:.1f}s): "
+                            f"{lock_path}")
+                    time.sleep(0.05)
+        # else: no cross-process lock available; proceed with in-process
+        # lock only (acquired=False)
         yield
     finally:
         if fh is not None:
             try:
-                if _HAS_MSVCRT:
-                    fh.seek(0)
-                    try:
-                        msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
-                    except OSError:
-                        pass
-                elif _HAS_FCNTL:
-                    try:
-                        fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
-                    except Exception:
-                        pass
+                if acquired:
+                    if _HAS_MSVCRT:
+                        fh.seek(0)
+                        try:
+                            msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+                        except OSError:
+                            pass
+                    elif _HAS_FCNTL:
+                        try:
+                            fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+                        except Exception:
+                            pass
             finally:
                 try:
                     fh.close()
@@ -209,31 +221,24 @@ class SessionStore:
         self._bindings = cleaned
         return dict(self._bindings)
 
-    def save(self) -> None:
-        """Atomic write (tmpfile + replace)。失敗は warning.
+    def save(self) -> bool:
+        """Atomic write (tmpfile + replace).
 
-        v2.3.2: cross-process file lock 配下で実行 (multi-process safety)。
+        v2.3.2: cross-process file lock 配下で実行。
+        v2.3.3: lock 取得失敗時は False を返す (write スキップ)。
         """
         try:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            payload = {
-                "version": SCHEMA_VERSION,
-                "bindings": self._bindings,
-            }
             with self._thread_lock, _file_lock(self._lock_path):
-                # tmpfile + rename for atomicity (Windows でも replace は atomic)
-                with tempfile.NamedTemporaryFile(
-                    mode="w", encoding="utf-8",
-                    dir=str(self.path.parent),
-                    prefix=".sessions_", suffix=".tmp", delete=False,
-                ) as tf:
-                    json.dump(payload, tf, ensure_ascii=False, indent=2)
-                    tmp_path = Path(tf.name)
-                os.replace(tmp_path, self.path)
+                self._save_locked()
+                return True
+        except SessionStoreLockTimeout as e:
+            logger.warning("save を中止 (lock 取得失敗): %s", e)
+            return False
         except Exception as e:
             logger.warning(
                 "session store の保存失敗 (path=%s): %s。"
                 "in-memory のみで継続", self.path, e)
+            return False
 
     # ---------- mutating ops ----------
 
@@ -265,47 +270,78 @@ class SessionStore:
         bind_method: str,
         idn_response: str = "",
         bound_at: str | None = None,
-    ) -> None:
+    ) -> bool:
         """add or update. 既存 record があれば bound_at は保持。
 
-        v2.3.2: file lock 配下で disk → 変更 → 書き戻しを atomic に
-        実行 (multi-process lost-update 防止)。
+        v2.3.2: file lock 配下で disk → 変更 → 書き戻しを atomic に実行。
+        v2.3.3: lock 取得に失敗した場合は in-memory 変更も
+        書き戻しもスキップして `False` を返す (multi-process safety)。
+        成功時は `True` を返す。
         """
-        with self._thread_lock, _file_lock(self._lock_path):
-            self._reload_from_disk_locked()
-            existing = self._bindings.get(resource) or {}
-            rec = {
-                "manufacturer": manufacturer,
-                "model": model,
-                "bind_method": bind_method,
-                "idn_response": idn_response,
-                "bound_at": existing.get("bound_at") or bound_at or _now_iso(),
-                "last_seen_at": _now_iso(),
-            }
-            self._bindings[resource] = rec
-            self._save_locked()
-
-    def touch(self, resource: str) -> None:
-        with self._thread_lock, _file_lock(self._lock_path):
-            self._reload_from_disk_locked()
-            if resource not in self._bindings:
-                return
-            self._bindings[resource]["last_seen_at"] = _now_iso()
-            self._save_locked()
-
-    def remove(self, resource: str) -> bool:
-        with self._thread_lock, _file_lock(self._lock_path):
-            self._reload_from_disk_locked()
-            if resource in self._bindings:
-                del self._bindings[resource]
+        try:
+            with self._thread_lock, _file_lock(self._lock_path):
+                self._reload_from_disk_locked()
+                existing = self._bindings.get(resource) or {}
+                rec = {
+                    "manufacturer": manufacturer,
+                    "model": model,
+                    "bind_method": bind_method,
+                    "idn_response": idn_response,
+                    "bound_at": existing.get("bound_at") or bound_at or _now_iso(),
+                    "last_seen_at": _now_iso(),
+                }
+                self._bindings[resource] = rec
                 self._save_locked()
                 return True
+        except SessionStoreLockTimeout as e:
+            logger.warning(
+                "upsert を中止 (lock 取得失敗): resource=%s, %s",
+                resource, e)
             return False
 
-    def clear_all(self) -> None:
-        with self._thread_lock, _file_lock(self._lock_path):
-            self._bindings = {}
-            self._save_locked()
+    def touch(self, resource: str) -> bool:
+        try:
+            with self._thread_lock, _file_lock(self._lock_path):
+                self._reload_from_disk_locked()
+                if resource not in self._bindings:
+                    return False
+                self._bindings[resource]["last_seen_at"] = _now_iso()
+                self._save_locked()
+                return True
+        except SessionStoreLockTimeout as e:
+            logger.warning("touch を中止 (lock 取得失敗): %s, %s",
+                           resource, e)
+            return False
+
+    def remove(self, resource: str) -> bool:
+        """resource を削除し、disk から実際に削除できたら True を返す。
+
+        v2.3.3: lock 取得失敗時は `False` を返す。`removed_from_store`
+        判定にはこの戻り値を直接使うこと (`get()` ベースは別 process が
+        追加した record を見落とす)。Codex v2.3.2 レビュー P2。
+        """
+        try:
+            with self._thread_lock, _file_lock(self._lock_path):
+                self._reload_from_disk_locked()
+                if resource in self._bindings:
+                    del self._bindings[resource]
+                    self._save_locked()
+                    return True
+                return False
+        except SessionStoreLockTimeout as e:
+            logger.warning("remove を中止 (lock 取得失敗): %s, %s",
+                           resource, e)
+            return False
+
+    def clear_all(self) -> bool:
+        try:
+            with self._thread_lock, _file_lock(self._lock_path):
+                self._bindings = {}
+                self._save_locked()
+                return True
+        except SessionStoreLockTimeout as e:
+            logger.warning("clear_all を中止 (lock 取得失敗): %s", e)
+            return False
 
     def _save_locked(self) -> None:
         """ロックを既に取得している前提の save 実装 (内部)。"""

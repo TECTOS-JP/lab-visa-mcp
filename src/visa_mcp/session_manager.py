@@ -204,14 +204,26 @@ class SessionManager:
     def list_sessions(self) -> list[dict]:
         return [s.to_dict() for s in self._sessions.values()]
 
-    def clear_session(self, resource_name: str) -> None:
-        self._sessions.pop(resource_name, None)
-        # v2.3.0: store からも削除
+    def clear_session(self, resource_name: str) -> dict:
+        """Resource を in-memory + store から削除する。
+
+        v2.3.3: 返り値に `{"removed_from_in_memory": bool,
+        "removed_from_store": bool}` を返す。`removed_from_store` は
+        `SessionStore.remove()` の戻り値 (disk 再読込後の実際の削除
+        結果) なので、別 process が同じ sessions.json に追加した
+        record も正しく検出できる (Codex v2.3.2 レビュー P2)。
+        """
+        in_mem = self._sessions.pop(resource_name, None) is not None
+        store_removed = False
         if self._store is not None:
             try:
-                self._store.remove(resource_name)
+                store_removed = bool(self._store.remove(resource_name))
             except Exception as e:
                 logger.warning("clear_session の persist 失敗: %s", e)
+        return {
+            "removed_from_in_memory": in_mem,
+            "removed_from_store": store_removed,
+        }
 
     def clear_all(self) -> None:
         """**全 binding を消す** (in-memory + persisted store)。

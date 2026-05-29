@@ -158,34 +158,30 @@ def register_tools(mcp: FastMCP, session_mgr: SessionManager) -> None:
         (または VISA_MCP_SESSION_STORE) からも除去する。同時に
         in-memory session も clear する。
 
-        v2.3.2: removed の判定を in-memory と store の OR で行う
-        (Codex v2.3.1 レビュー P2)。definition 不在で restore skip
-        された record も「store にあれば削除」されることを反映する。
+        v2.3.3: `removed_from_store` を `SessionStore.remove()` の
+        戻り値 (disk 再読込後の実際の削除結果) で判定する
+        (Codex v2.3.2 レビュー P2)。これにより別 process が同じ
+        sessions.json に追加した record も正しく検出できる。
 
         Args:
             resource_name: 削除する VISA resource (例: "GPIB0::2::INSTR")
 
         Returns:
             data.removed: bool (in-memory または store に存在して削除した場合 True)
-            data.removed_from_in_memory: bool
-            data.removed_from_store: bool
+            data.removed_from_in_memory: bool (in-memory session があったか)
+            data.removed_from_store: bool (store.remove() が True を返したか)
             data.resource_name: 対象 resource
             data.remaining_sessions: 現在残っている in-memory session 数
         """
-        in_mem_existed = (
-            session_mgr.get_session(resource_name) is not None)
-        store = session_mgr.store
-        store_existed = (
-            store is not None
-            and store.get(resource_name) is not None)
-        existed_anywhere = in_mem_existed or store_existed
-        session_mgr.clear_session(resource_name)
+        outcome = session_mgr.clear_session(resource_name)
+        in_mem = bool(outcome.get("removed_from_in_memory"))
+        store_removed = bool(outcome.get("removed_from_store"))
         return {
             "success": True,
             "data": {
-                "removed": existed_anywhere,
-                "removed_from_in_memory": in_mem_existed,
-                "removed_from_store": store_existed,
+                "removed": in_mem or store_removed,
+                "removed_from_in_memory": in_mem,
+                "removed_from_store": store_removed,
                 "resource_name": resource_name,
                 "remaining_sessions": len(session_mgr.list_sessions()),
             },

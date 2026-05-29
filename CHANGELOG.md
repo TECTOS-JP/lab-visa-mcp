@@ -1,5 +1,47 @@
 # 変更履歴
 
+## v2.3.3 — Codex v2.3.2 レビュー対応 (lock timeout 例外化 + removed_from_store の disk-aware 判定)
+
+合言葉: **「lock 取れないなら書かない、削除確認は disk から取る」**
+
+### Codex v2.3.2 レビュー指摘 2 件
+
+| # | 指摘 | 対応 |
+|---|------|------|
+| **P1** | `_file_lock` の timeout 後 warning だけで yield に進み、lock を取れない状態でも mutating ops が write を続行 → multi-process safety が壊れる | `SessionStoreLockTimeout` 例外を新設。timeout 時は raise。upsert/touch/remove/clear_all/save は catch して write を skip し `False` を返す |
+| **P2** | `clear_persisted_binding` の `removed_from_store` を `store.get()` で判定。`get()` は disk 再読込しないため、別 process が同じ sessions.json に追加した record は `store.remove()` で削除できても response は `removed_from_store=false` | `SessionManager.clear_session()` の戻り値を `{removed_from_in_memory: bool, removed_from_store: bool}` 辞書に変更。`removed_from_store` は `SessionStore.remove()` の戻り値 (disk 再読込後の実結果)。`clear_persisted_binding` はこれを直接使う |
+
+### 修正
+
+- `SessionStoreLockTimeout(RuntimeError)` 新設
+- `_file_lock`: timeout 時 raise + `acquired` フラグ管理で正しく release
+- `SessionStore.upsert/touch/remove/clear_all/save`: 戻り値が `bool` に
+  なり、lock 取得失敗時は `False` (write skip + warn)。成功時 `True`
+- `SessionManager.clear_session(resource_name) -> dict`:
+  - `{"removed_from_in_memory": bool, "removed_from_store": bool}` を返す
+  - `removed_from_store` は `SessionStore.remove()` の戻り値
+- `discovery.clear_persisted_binding`: 上記辞書を使って response 生成
+- 5 件 test 追加 (`test_v2_3_3_review.py`):
+  - lock 競合で `SessionStoreLockTimeout` raise
+  - upsert/remove は timeout 時 `False` を返し write skip
+  - 別 SessionStore (process simulate) が追加した record を
+    `clear_session` 経由で削除すると `removed_from_store=True`
+  - clear_session 戻り値の dict 形状検証
+  - version sentinel
+
+### 互換性
+
+- `SessionStore` 内部 API: `upsert/touch/remove/clear_all/save` 戻り値が
+  `None` → `bool` に変化 (利用箇所は visa-mcp 内部のみ)。
+- `SessionManager.clear_session(...)` 戻り値が `None` → `dict` に変化
+  (visa-mcp 外部利用は無し)。
+- MCP tool `clear_persisted_binding` の response data 構造は不変
+  (`removed`, `removed_from_in_memory`, `removed_from_store`,
+  `resource_name`, `remaining_sessions`)。
+
+lab-executor v2.14.3 と組み合わせて使用 (依存変更なし)。
+
+
 ## v2.3.2 — Codex v2.3.1 レビュー対応 (reload 保護 + removed 判定 + multi-process lock)
 
 合言葉: **「YAML reload で persisted bindings は消えない」**
