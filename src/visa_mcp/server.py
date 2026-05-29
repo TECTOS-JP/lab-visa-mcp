@@ -1,5 +1,6 @@
 from __future__ import annotations
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -28,7 +29,56 @@ logging.basicConfig(
     stream=sys.stderr,
 )
 
-INSTRUMENTS_DIR = Path(__file__).parent.parent.parent / "instruments"
+def _resolve_instruments_dir() -> Path:
+    """v2.1.4: instrument YAML 定義のロード先を優先順で決定する。
+
+    優先順:
+      1. `$VISA_MCP_INSTRUMENTS_DIR` 環境変数 (運用上書き)
+      2. `<repo>/instruments` (旧来パス、開発時の `_system.yaml` 用)
+      3. `<repo>/examples/instruments` (開発リポジトリ)
+      4. `<pkg>/builtin_instruments` (wheel 同梱、最後の fallback)
+
+    v2.1.3 までは 2 のみだったため、`pip install visa-mcp` 後に
+    `visa-mcp serve` を起動すると YAML 0 件 load で詰まっていた。
+    v2.1.4 で同梱 `builtin_instruments` を最終 fallback とすることで
+    手動 YAML コピー無しでも動くようにする。
+    """
+    env = os.environ.get("VISA_MCP_INSTRUMENTS_DIR", "").strip()
+    if env:
+        p = Path(env).expanduser()
+        if p.is_dir():
+            return p
+        logger.warning(
+            "VISA_MCP_INSTRUMENTS_DIR=%s は存在しません。fallback 探索に移ります", env)
+    here = Path(__file__).resolve()
+    repo_root = here.parent.parent.parent
+    # 「instrument YAML」は `_` 始まりでない (= _system.yaml /
+    # _template.yaml 等の system/template ファイルを除く) yaml を
+    # 1 件以上含むディレクトリ、と定義する。
+    def _has_instrument_yaml(d: Path) -> bool:
+        if not d.is_dir():
+            return False
+        return any(
+            p.name and not p.name.startswith("_")
+            for p in d.glob("*.yaml")
+        )
+
+    for cand in (
+        repo_root / "examples" / "instruments",  # 開発リポジトリ優先
+        repo_root / "instruments",
+    ):
+        if _has_instrument_yaml(cand):
+            return cand
+    # wheel-installed default
+    builtin = here.parent / "builtin_instruments"
+    if builtin.is_dir():
+        return builtin
+    # 見つからなければ builtin の path を返す (registry 側で 0 件 + warn)
+    return builtin
+
+
+logger = logging.getLogger(__name__)
+INSTRUMENTS_DIR = _resolve_instruments_dir()
 
 _safety_mode = sf.get_safety_mode()
 
@@ -82,6 +132,21 @@ mcp = FastMCP(
 visa_mgr = VisaManager()
 registry = InstrumentRegistry(INSTRUMENTS_DIR)
 session_mgr = SessionManager(visa_mgr, registry)
+# v2.1.4: 起動時に instrument YAML のロード状況を可視化
+try:
+    _defs = registry.list_definitions()
+    logger.info(
+        "instrument registry resolved: dir=%s, definitions=%d",
+        INSTRUMENTS_DIR, len(_defs),
+    )
+    if not _defs:
+        logger.warning(
+            "instrument registry に YAML 定義がありません。"
+            " VISA_MCP_INSTRUMENTS_DIR を設定するか、"
+            " builtin_instruments を確認してください: %s", INSTRUMENTS_DIR,
+        )
+except Exception as _e:
+    logger.warning("instrument registry list_definitions が失敗: %s", _e)
 # v0.6.0: SystemConfig (instruments/_system.yaml) を読み込み
 _system_config = SystemConfig.from_yaml(INSTRUMENTS_DIR / "_system.yaml")
 _bus_mgr = BusManager(_system_config)

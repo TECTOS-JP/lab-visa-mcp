@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "visa-mcp"
-version = "2.1.3"
+version = "2.1.4"
 description = "PyVISA backend + compatibility shim for lab-executor-mcp. Hardware (GPIB / USB / Serial / LAN) communication layer."
 readme = "README.md"
 license = { text = "MIT" }
@@ -50,6 +50,11 @@ packages = ["src/visa_mcp"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "src/visa_mcp/templates" = "visa_mcp/templates"
+# v2.1.4: builtin_instruments を wheel に同梱して、
+# `pip install visa-mcp` だけで `visa-mcp serve` が
+# YAML 機器定義を読み込めるようにする。
+# (v2.1.3 までは examples/ が wheel に含まれず 0 件 load 問題)
+"src/visa_mcp/builtin_instruments" = "visa_mcp/builtin_instruments"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

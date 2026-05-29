@@ -1,5 +1,55 @@
 # 変更履歴
 
+## v2.1.4 — wheel に builtin_instruments を同梱 + INSTRUMENTS_DIR resolver
+
+合言葉: **「`pip install visa-mcp` 直後に YAML 0 件にならない」**
+
+Codex 実機 E2E (v2.1.3 wheel) で `visa-mcp serve` 起動直後に
+instrument 定義が 0 件 load される問題が発生した。原因:
+
+- `src/visa_mcp/examples/instruments/*.yaml` は wheel に含まれていない
+- 旧 `server.py` の `INSTRUMENTS_DIR` は `<repo>/instruments` 固定で、
+  wheel install 環境ではほぼ存在しない path を指していた
+
+### 修正
+
+- `src/visa_mcp/builtin_instruments/` 配下に主要 YAML を同梱
+  (PMX35-3A / Yokogawa 7563 / `_system.yaml`)
+- `pyproject.toml` `force-include` に `builtin_instruments` を追加
+  → wheel に確実に同梱される
+- `server.py:_resolve_instruments_dir()` を導入し、以下の優先順で
+  探索:
+  1. `$VISA_MCP_INSTRUMENTS_DIR` env 上書き (運用)
+  2. `<repo>/examples/instruments` (開発)
+  3. `<repo>/instruments` (開発、template/system のみは除外)
+  4. `<pkg>/builtin_instruments` (wheel default)
+- 起動時 log に `resolved dir + definition count` を出力。
+  0 件の場合は WARNING で env 設定方法を案内。
+- 新規 test 5 件 (`test_v2_1_4_packaging.py`):
+  - builtin_instruments dir に YAML が存在する
+  - env override 優先
+  - dev path 不在時 builtin fallback
+  - version sentinel ≥ 2.1.4
+  - pyproject.toml に force-include 設定
+
+### 使い方
+
+```
+pip install --upgrade visa-mcp        # 同梱 YAML が利用可能
+visa-mcp serve                         # builtin_instruments を auto load
+# または運用上書き:
+VISA_MCP_INSTRUMENTS_DIR=/path/to/yamls visa-mcp serve
+```
+
+### 互換性
+
+完全後方互換。既存 dev 環境 (`<repo>/instruments` / `examples/`)
+は引き続き優先される。同梱 builtin は最終 fallback。
+Stable / Experimental tool API は不変。
+
+Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>
+
+
 ## v2.1.3 — get_experiment_results response に version sentinel 追加
 
 v2.1.2 反映後の Codex 実機 E2E でも rows=0 が報告されたため
