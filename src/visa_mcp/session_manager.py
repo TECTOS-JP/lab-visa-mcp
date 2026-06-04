@@ -8,6 +8,7 @@ from visa_mcp.instrument_registry import InstrumentRegistry
 from visa_mcp.models.instrument_def import InstrumentDefinition
 from visa_mcp.visa_manager import VisaManager
 from visa_mcp.utils.idn_matcher import parse_idn
+from visa_mcp.session_store import SessionStoreLockTimeout
 
 if TYPE_CHECKING:
     from visa_mcp.session_store import SessionStore
@@ -24,6 +25,12 @@ class InstrumentSession:
     identified_at: datetime = field(default_factory=datetime.now)
     # v0.2.0: 安全制約の前提条件チェック用にコマンド実行履歴を保持
     command_history: list[str] = field(default_factory=list)
+    # v2.3.4: bind/identify 時の persist 結果。
+    # `persisted=False` のときは process 再起動後に restore されない。
+    # `persist_error` が "lock_timeout" 等のとき詳細を含む。
+    # store 無し (in-memory only) の SessionManager では `persisted=None`。
+    persisted: bool | None = None
+    persist_error: str | None = None
 
     def record_command(self, command_name: str) -> None:
         """成功したコマンド名を履歴に追加 (preconditions チェック用)"""
@@ -142,15 +149,29 @@ class SessionManager:
         self._sessions[resource_name] = session
         logger.info("手動バインド: %s → %s", resource_name, defn.display_name)
         # v2.3.0: 永続化
+        # v2.3.4: upsert の戻り値を session.persisted に反映し、
+        # discovery.bind_definition の MCP response にも伝える
+        # (Codex v2.3.3 レビュー P1)。
         if self._store is not None:
             try:
-                self._store.upsert(
+                ok = self._store.upsert(
                     resource_name,
                     manufacturer=manufacturer,
                     model=model,
                     bind_method="manual",
                 )
+                session.persisted = bool(ok)
+                if not ok:
+                    session.persist_error = "save_failed"
+            except SessionStoreLockTimeout:
+                session.persisted = False
+                session.persist_error = "lock_timeout"
+                logger.warning(
+                    "bind_manually: %s の永続化が lock timeout "
+                    "(再起動後 restore されません)", resource_name)
             except Exception as e:
+                session.persisted = False
+                session.persist_error = type(e).__name__
                 logger.warning("bind_manually の persist 失敗: %s", e)
         return session
 
@@ -185,17 +206,33 @@ class SessionManager:
         # する。IDN response の "KIKUSUI" と YAML の "Kikusui" の
         # case mismatch で restore 時に definition lookup が失敗する
         # 問題を回避する。
+        # v2.3.4: upsert 戻り値を session.persisted に反映 (Codex v2.3.3 P1)。
         if self._store is not None and defn is not None:
             try:
-                self._store.upsert(
+                ok = self._store.upsert(
                     resource_name,
                     manufacturer=defn.metadata.manufacturer,
                     model=defn.metadata.model,
                     bind_method="identify",
                     idn_response=idn,
                 )
+                session.persisted = bool(ok)
+                if not ok:
+                    session.persist_error = "save_failed"
+            except SessionStoreLockTimeout:
+                session.persisted = False
+                session.persist_error = "lock_timeout"
+                logger.warning(
+                    "identify: %s の永続化が lock timeout "
+                    "(再起動後 restore されません)", resource_name)
             except Exception as e:
+                session.persisted = False
+                session.persist_error = type(e).__name__
                 logger.warning("identify の persist 失敗: %s", e)
+        elif self._store is not None and defn is None:
+            # store はあるが definition 未解決 → persist しない
+            session.persisted = False
+            session.persist_error = "definition_unresolved"
         return session
 
     def get_session(self, resource_name: str) -> InstrumentSession | None:
@@ -207,22 +244,31 @@ class SessionManager:
     def clear_session(self, resource_name: str) -> dict:
         """Resource を in-memory + store から削除する。
 
-        v2.3.3: 返り値に `{"removed_from_in_memory": bool,
-        "removed_from_store": bool}` を返す。`removed_from_store` は
-        `SessionStore.remove()` の戻り値 (disk 再読込後の実際の削除
-        結果) なので、別 process が同じ sessions.json に追加した
-        record も正しく検出できる (Codex v2.3.2 レビュー P2)。
+        v2.3.3: `{"removed_from_in_memory": bool,
+        "removed_from_store": bool}` を返す。
+        v2.3.4: `store_error: Optional[str]` を追加 (Codex v2.3.3 P2)。
+        lock timeout 等で store 削除に失敗した場合に文字列で示し、
+        MCP tool 側で `success=false` に反映できるようにする。
         """
         in_mem = self._sessions.pop(resource_name, None) is not None
         store_removed = False
+        store_error: str | None = None
         if self._store is not None:
             try:
                 store_removed = bool(self._store.remove(resource_name))
+            except SessionStoreLockTimeout:
+                store_error = "lock_timeout"
+                logger.warning(
+                    "clear_session: %s の store 削除が lock timeout "
+                    "(record は disk に残っているため再起動後に復活)",
+                    resource_name)
             except Exception as e:
+                store_error = type(e).__name__
                 logger.warning("clear_session の persist 失敗: %s", e)
         return {
             "removed_from_in_memory": in_mem,
             "removed_from_store": store_removed,
+            "store_error": store_error,
         }
 
     def clear_all(self) -> None:

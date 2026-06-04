@@ -224,21 +224,18 @@ class SessionStore:
     def save(self) -> bool:
         """Atomic write (tmpfile + replace).
 
-        v2.3.2: cross-process file lock 配下で実行。
-        v2.3.3: lock 取得失敗時は False を返す (write スキップ)。
+        v2.3.4: lock timeout は SessionStoreLockTimeout で伝播。
+        IO エラーのみ catch して False を返す。
         """
-        try:
-            with self._thread_lock, _file_lock(self._lock_path):
+        with self._thread_lock, _file_lock(self._lock_path):
+            try:
                 self._save_locked()
                 return True
-        except SessionStoreLockTimeout as e:
-            logger.warning("save を中止 (lock 取得失敗): %s", e)
-            return False
-        except Exception as e:
-            logger.warning(
-                "session store の保存失敗 (path=%s): %s。"
-                "in-memory のみで継続", self.path, e)
-            return False
+            except Exception as e:
+                logger.warning(
+                    "session store の保存失敗 (path=%s): %s。"
+                    "in-memory のみで継続", self.path, e)
+                return False
 
     # ---------- mutating ops ----------
 
@@ -273,75 +270,56 @@ class SessionStore:
     ) -> bool:
         """add or update. 既存 record があれば bound_at は保持。
 
-        v2.3.2: file lock 配下で disk → 変更 → 書き戻しを atomic に実行。
-        v2.3.3: lock 取得に失敗した場合は in-memory 変更も
-        書き戻しもスキップして `False` を返す (multi-process safety)。
-        成功時は `True` を返す。
+        v2.3.4: lock 取得失敗時は `SessionStoreLockTimeout` を上位に
+        伝播させる (Codex v2.3.3 レビュー P1)。これにより
+        SessionManager.bind_manually / identify が `persist_error` を
+        正確に検出できる。成功時は `True` を返す
+        (将来 partial failure を区別する余地のための bool 維持)。
         """
-        try:
-            with self._thread_lock, _file_lock(self._lock_path):
-                self._reload_from_disk_locked()
-                existing = self._bindings.get(resource) or {}
-                rec = {
-                    "manufacturer": manufacturer,
-                    "model": model,
-                    "bind_method": bind_method,
-                    "idn_response": idn_response,
-                    "bound_at": existing.get("bound_at") or bound_at or _now_iso(),
-                    "last_seen_at": _now_iso(),
-                }
-                self._bindings[resource] = rec
-                self._save_locked()
-                return True
-        except SessionStoreLockTimeout as e:
-            logger.warning(
-                "upsert を中止 (lock 取得失敗): resource=%s, %s",
-                resource, e)
-            return False
+        with self._thread_lock, _file_lock(self._lock_path):
+            self._reload_from_disk_locked()
+            existing = self._bindings.get(resource) or {}
+            rec = {
+                "manufacturer": manufacturer,
+                "model": model,
+                "bind_method": bind_method,
+                "idn_response": idn_response,
+                "bound_at": existing.get("bound_at") or bound_at or _now_iso(),
+                "last_seen_at": _now_iso(),
+            }
+            self._bindings[resource] = rec
+            self._save_locked()
+            return True
 
     def touch(self, resource: str) -> bool:
-        try:
-            with self._thread_lock, _file_lock(self._lock_path):
-                self._reload_from_disk_locked()
-                if resource not in self._bindings:
-                    return False
-                self._bindings[resource]["last_seen_at"] = _now_iso()
-                self._save_locked()
-                return True
-        except SessionStoreLockTimeout as e:
-            logger.warning("touch を中止 (lock 取得失敗): %s, %s",
-                           resource, e)
-            return False
+        with self._thread_lock, _file_lock(self._lock_path):
+            self._reload_from_disk_locked()
+            if resource not in self._bindings:
+                return False
+            self._bindings[resource]["last_seen_at"] = _now_iso()
+            self._save_locked()
+            return True
 
     def remove(self, resource: str) -> bool:
         """resource を削除し、disk から実際に削除できたら True を返す。
 
-        v2.3.3: lock 取得失敗時は `False` を返す。`removed_from_store`
-        判定にはこの戻り値を直接使うこと (`get()` ベースは別 process が
-        追加した record を見落とす)。Codex v2.3.2 レビュー P2。
+        v2.3.4: lock 取得失敗時は `SessionStoreLockTimeout` を伝播
+        させる (Codex v2.3.3 レビュー P2)。これで「もともと無かった
+        (False)」と「lock 失敗 (例外)」を呼び出し側で区別できる。
         """
-        try:
-            with self._thread_lock, _file_lock(self._lock_path):
-                self._reload_from_disk_locked()
-                if resource in self._bindings:
-                    del self._bindings[resource]
-                    self._save_locked()
-                    return True
-                return False
-        except SessionStoreLockTimeout as e:
-            logger.warning("remove を中止 (lock 取得失敗): %s, %s",
-                           resource, e)
+        with self._thread_lock, _file_lock(self._lock_path):
+            self._reload_from_disk_locked()
+            if resource in self._bindings:
+                del self._bindings[resource]
+                self._save_locked()
+                return True
             return False
 
     def clear_all(self) -> bool:
-        try:
-            with self._thread_lock, _file_lock(self._lock_path):
-                self._bindings = {}
-                self._save_locked()
-                return True
-        except SessionStoreLockTimeout as e:
-            logger.warning("clear_all を中止 (lock 取得失敗): %s", e)
-            return False
+        with self._thread_lock, _file_lock(self._lock_path):
+            self._bindings = {}
+            self._save_locked()
+            return True
 
     def _save_locked(self) -> None:
         """ロックを既に取得している前提の save 実装 (内部)。"""

@@ -48,38 +48,11 @@ def test_file_lock_raises_timeout_when_busy(tmp_path):
         t.join(timeout=5.0)
 
 
-def test_upsert_skips_write_on_lock_timeout(tmp_path, monkeypatch):
-    """upsert が lock を取れなかったとき (`SessionStoreLockTimeout`)、
-    write をスキップして False を返すこと。in-memory も更新しない。
+def test_upsert_raises_on_lock_timeout(tmp_path, monkeypatch):
+    """v2.3.4: upsert は lock 取れないと SessionStoreLockTimeout を
+    raise する (v2.3.3 の bool 戻り値 → 例外伝播へ変更)。
     """
     s = SessionStore(tmp_path / "s.json")
-    # `_file_lock` を常に timeout する関数に差し替え
-    import visa_mcp.session_store as mod
-
-    def boom(*args, **kwargs):
-        raise SessionStoreLockTimeout("simulated timeout")
-
-    import contextlib
-
-    @contextlib.contextmanager
-    def fake_lock(*args, **kwargs):
-        raise SessionStoreLockTimeout("simulated timeout")
-        yield  # unreachable
-
-    monkeypatch.setattr(mod, "_file_lock", fake_lock)
-    ok = s.upsert("R", manufacturer="M", model="X", bind_method="manual")
-    assert ok is False, "lock timeout 時は False を返すべき"
-    # in-memory も更新されていない
-    assert s.get("R") is None
-    # disk にも書かれていない
-    assert not (tmp_path / "s.json").exists()
-
-
-def test_remove_returns_false_on_lock_timeout(tmp_path, monkeypatch):
-    """remove も timeout 時 False を返し、disk write しない。"""
-    s = SessionStore(tmp_path / "s.json")
-    s.upsert("R", manufacturer="M", model="X", bind_method="manual")
-    # 以後 lock 失敗
     import visa_mcp.session_store as mod
     import contextlib
 
@@ -89,11 +62,30 @@ def test_remove_returns_false_on_lock_timeout(tmp_path, monkeypatch):
         yield
 
     monkeypatch.setattr(mod, "_file_lock", fake_lock)
-    ok = s.remove("R")
-    assert ok is False
+    with pytest.raises(SessionStoreLockTimeout):
+        s.upsert("R", manufacturer="M", model="X", bind_method="manual")
+    # in-memory も disk も変化なし
+    assert s.get("R") is None
+    assert not (tmp_path / "s.json").exists()
+
+
+def test_remove_raises_on_lock_timeout(tmp_path, monkeypatch):
+    """v2.3.4: remove も lock timeout で raise。"""
+    s = SessionStore(tmp_path / "s.json")
+    s.upsert("R", manufacturer="M", model="X", bind_method="manual")
+    import visa_mcp.session_store as mod
+    import contextlib
+
+    @contextlib.contextmanager
+    def fake_lock(*args, **kwargs):
+        raise SessionStoreLockTimeout("simulated timeout")
+        yield
+
+    monkeypatch.setattr(mod, "_file_lock", fake_lock)
+    with pytest.raises(SessionStoreLockTimeout):
+        s.remove("R")
     # disk には残っている
-    on_disk = SessionStore(tmp_path / "s.json").load()
-    assert "R" in on_disk
+    assert "R" in SessionStore(tmp_path / "s.json").load()
 
 
 # ==============================================================

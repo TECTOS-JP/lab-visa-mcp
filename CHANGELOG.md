@@ -1,5 +1,48 @@
 # 変更履歴
 
+## v2.3.4 — Codex v2.3.3 レビュー対応 (persist 失敗の可視化 + clear 失敗の success=false)
+
+合言葉: **「保存できなかったら正直に言う」**
+
+### Codex v2.3.3 レビュー指摘 2 件
+
+| # | 指摘 | 対応 |
+|---|------|------|
+| **P1** | `bind_definition` / `identify_instrument` が永続化失敗を `success=true` で返す (upsert の戻り値を見ていない)。再起動後 restore されないのに気づけない | `InstrumentSession.persisted` / `persist_error` フィールド追加。`bind_manually` / `identify` が upsert 結果を反映。discovery tool の response data に `persisted` (+ 失敗時 `persist_error`) を含める |
+| **P2** | `clear_persisted_binding` が store 削除失敗時も `success=true`。lock timeout で再起動後に binding 復活 | `clear_session()` 戻り値に `store_error` 追加。`clear_persisted_binding` は `store_error` があれば `success=false` + `PersistedBindingClearFailed` を返す |
+
+### 設計変更: SessionStore mutating ops を例外伝播に
+
+v2.3.3 では lock timeout 時 `False` を返していたが、「もともと
+record が無かった (False)」と「lock 失敗」を呼び出し側が区別
+できなかった。v2.3.4 では:
+
+- `upsert/touch/remove/clear_all`: lock timeout 時
+  `SessionStoreLockTimeout` を**伝播** (IO エラーのみ catch)
+- `SessionManager` 側で catch して `persist_error="lock_timeout"` /
+  `store_error="lock_timeout"` に変換
+
+### 修正詳細
+
+- `InstrumentSession`: `persisted: bool|None`, `persist_error: str|None`
+  - store 無効環境では `persisted=None` (in-memory only)
+- `SessionManager.bind_manually/identify`: upsert 結果を session へ
+- `SessionManager.clear_session() -> dict`: `store_error` 追加
+- `discovery.bind_definition / identify_instrument`: response に
+  `persisted` (+ `persist_error`)
+- `discovery.clear_persisted_binding`: `store_error` 時 `success=false`
+- 7 件 test 追加 (`test_v2_3_4_review.py`)
+
+### 互換性
+
+- MCP tool response: `persisted` / `persist_error` / `store_error` は
+  **追加 field** (既存 client は無視可)
+- `SessionStore` mutating ops の戻り値型は `bool` 維持だが、lock
+  timeout 時は例外を投げるよう変更 (利用は visa-mcp 内部のみ)
+- 実機 smoke: identify PMX / bind 7563 とも `persisted=True`、
+  clear で `store_error=None` 確認
+
+
 ## v2.3.3 — Codex v2.3.2 レビュー対応 (lock timeout 例外化 + removed_from_store の disk-aware 判定)
 
 合言葉: **「lock 取れないなら書かない、削除確認は disk から取る」**

@@ -39,7 +39,14 @@ def register_tools(mcp: FastMCP, session_mgr: SessionManager) -> None:
         """
         try:
             session = await session_mgr.identify(resource_name)
-            return {"success": True, "data": session.to_dict()}
+            # v2.3.4: persist 結果を expose (Codex v2.3.3 P1)。
+            data = session.to_dict()
+            data["persisted"] = (
+                session.persisted if session.persisted is not None
+                else True)
+            if session.persist_error:
+                data["persist_error"] = session.persist_error
+            return {"success": True, "data": data}
         except VisaError as e:
             return {"success": False, "error": type(e).__name__, "message": str(e), "resource_name": resource_name}
 
@@ -176,12 +183,34 @@ def register_tools(mcp: FastMCP, session_mgr: SessionManager) -> None:
         outcome = session_mgr.clear_session(resource_name)
         in_mem = bool(outcome.get("removed_from_in_memory"))
         store_removed = bool(outcome.get("removed_from_store"))
+        store_error = outcome.get("store_error")
+        # v2.3.4: store 削除エラー (lock timeout 等) があれば
+        # tool 自体を success=False で返す (Codex v2.3.3 P2)。
+        # 再起動後に binding が復活する可能性を caller に通知。
+        if store_error:
+            return {
+                "success": False,
+                "error": "PersistedBindingClearFailed",
+                "message": (
+                    f"in-memory session は clear したが store からの "
+                    f"削除に失敗しました ({store_error})。"
+                    f"再起動後 binding が復活する可能性があります。"),
+                "data": {
+                    "removed": in_mem,
+                    "removed_from_in_memory": in_mem,
+                    "removed_from_store": False,
+                    "store_error": store_error,
+                    "resource_name": resource_name,
+                    "remaining_sessions": len(session_mgr.list_sessions()),
+                },
+            }
         return {
             "success": True,
             "data": {
                 "removed": in_mem or store_removed,
                 "removed_from_in_memory": in_mem,
                 "removed_from_store": store_removed,
+                "store_error": None,
                 "resource_name": resource_name,
                 "remaining_sessions": len(session_mgr.list_sessions()),
             },
@@ -261,7 +290,18 @@ def register_tools(mcp: FastMCP, session_mgr: SessionManager) -> None:
                 "message": f"'{manufacturer}' / '{model}' に一致する定義が見つかりません。",
                 "available_definitions": available,
             }
-        return {"success": True, "data": session.to_dict()}
+        # v2.3.4: persist 結果を response に含める (Codex v2.3.3 P1)。
+        # in-memory session 作成は成功しているが、永続化が lock timeout
+        # 等で失敗した場合は `persisted=False` + 詳細を返す。
+        # tool 自体は in-memory bind 成功なので success=True 維持。
+        data = session.to_dict()
+        data["persisted"] = (
+            session.persisted if session.persisted is not None
+            else True  # store 無効環境では in-memory only として True 扱い
+        )
+        if session.persist_error:
+            data["persist_error"] = session.persist_error
+        return {"success": True, "data": data}
 
     @mcp.tool()
     async def reload_definitions() -> dict:
