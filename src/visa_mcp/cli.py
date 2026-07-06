@@ -187,6 +187,17 @@ def build_parser() -> argparse.ArgumentParser:
     val.set_defaults(func=cmd_validate)
 
     serve = sub.add_parser("serve", help="MCP server を起動 (default)")
+    serve.add_argument(
+        "--control-port", type=int, default=None,
+        help=(
+            "(v2.7) serve プロセス内に 127.0.0.1:<PORT> の HTTP "
+            "コントロールプレーンを立て、lab-executor ui から実機 job の "
+            "キャンセル / レシピ投入を可能にする (0 = OS 任せ)。環境変数 "
+            "LAB_EXECUTOR_CONTROL_PORT でも指定可 (CLI 優先)。"
+            "lab-executor-mcp>=2.24.0 が必要。省略時は従来どおり無効 "
+            "(挙動不変)。"
+        ),
+    )
     serve.set_defaults(func=cmd_serve)
 
     # v1.3: extension management
@@ -549,7 +560,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def cmd_serve(args: argparse.Namespace) -> int:
     from visa_mcp.server import main as server_main
-    server_main()
+    server_main(control_port=getattr(args, "control_port", None))
     return 0
 
 

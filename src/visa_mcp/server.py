@@ -152,8 +152,64 @@ audit_tools.register_tools(mcp, job_mgr)
 pdf_extractor.register_tools(mcp)
 
 
-def main() -> None:
-    mcp.run(transport="stdio")
+def main(control_port: int | None = None) -> None:
+    """MCP server を起動する。
+
+    v2.7.0: ``control_port`` を渡すと (または env
+    ``LAB_EXECUTOR_CONTROL_PORT`` があると)、serve プロセス内に
+    lab-executor の Web UI M4 コントロールプレーン (127.0.0.1 固定 HTTP)
+    を立て、実機 job のキャンセル / レシピ投入を UI から可能にする。
+    未指定 (最終的に None) なら **従来どおり** ``mcp.run(transport="stdio")``
+    のみ (挙動不変)。
+    """
+    port = control_port
+    try:
+        from lab_executor.control_plane import resolve_control_port
+    except ImportError:
+        resolve_control_port = None  # 古い lab_executor でも従来経路は動く
+
+    if resolve_control_port is not None:
+        # CLI 値優先、無ければ env LAB_EXECUTOR_CONTROL_PORT を読む。
+        port = resolve_control_port(control_port)
+    elif port is None:
+        # resolver が無い古い lab_executor でも env を最小限尊重する。
+        import os
+
+        raw = os.environ.get("LAB_EXECUTOR_CONTROL_PORT")
+        if raw and raw.strip():
+            try:
+                port = int(raw)
+            except ValueError:
+                port = None
+
+    if port is None:
+        # ---- 従来経路 (コントロール無効): 挙動不変 ----
+        mcp.run(transport="stdio")
+        return
+
+    # ---- コントロールプレーン有効経路 (v2.7.0) ----
+    try:
+        from lab_executor.control_plane import run_mcp_with_control
+    except ImportError:
+        print(
+            "visa-mcp serve --control-port はコントロールプレーン runner を "
+            "提供する lab-executor-mcp>=2.24.0 が必要です。"
+            "従来どおり stdio のみで起動します "
+            "(pip install -U 'lab-executor-mcp>=2.24.0')。",
+            file=sys.stderr,
+        )
+        mcp.run(transport="stdio")
+        return
+
+    import asyncio
+
+    logger.info(
+        "visa-mcp control plane enabled on 127.0.0.1:%s (backend=pyvisa)",
+        port,
+    )
+    asyncio.run(
+        run_mcp_with_control(mcp, job_mgr, port, backend_id="pyvisa")
+    )
 
 
 if __name__ == "__main__":

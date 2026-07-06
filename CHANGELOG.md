@@ -1,5 +1,36 @@
 # 変更履歴
 
+## v2.7.0 — 実機 serve でも Web UI M4 コントロールプレーンを有効化
+
+合言葉: **「実機の関所にも、同じ鍵の受け渡し口を付ける」**
+
+### 背景
+
+lab-executor v2.24.0 で Web UI M4 のコントロールプレーン runner が
+公開 API (`lab_executor.control_plane.run_mcp_with_control`) 化された。
+これを利用し、`visa-mcp serve` (PyVISA backend) でも `lab-executor ui`
+から実機 job のキャンセル / レシピ投入ができるようにした。
+
+### 追加
+
+- `visa-mcp serve --control-port <PORT>` — serve プロセス内に 127.0.0.1
+  固定の HTTP コントロールプレーンを立てる (0 = OS 任せ)。環境変数
+  `LAB_EXECUTOR_CONTROL_PORT` でも指定可 (CLI 優先)。**省略時は従来どおり
+  無効** で、`mcp.run(transport="stdio")` のみ (挙動不変)。
+  - `server.main(control_port: int | None = None)` に引数を追加。None の
+    ときは `lab_executor.control_plane.resolve_control_port(None)` で env を
+    確認する。最終的に None なら従来経路。port ありなら
+    `asyncio.run(run_mcp_with_control(mcp, job_mgr, port, backend_id="pyvisa"))`。
+  - MCP ツール面は不変。control 無効時の serve の挙動は 1 行も変わらない。
+
+### 互換性
+
+- `lab-executor-mcp` が古く `run_mcp_with_control` が無い場合は
+  「lab-executor-mcp>=2.24.0 が必要」と stderr 案内し、従来経路
+  (`mcp.run(transport="stdio")`) にフォールバックする。
+- 依存を `lab-executor-mcp>=2.24.0,<3.0.0` に更新。
+- version を `2.7.0` に更新。
+
 ## v2.6.0 — export shim sync with lab-executor v2.18/v2.19
 
 合言葉: **「visa-mcp 経由でも export の列と絞り込みを揃える」**
