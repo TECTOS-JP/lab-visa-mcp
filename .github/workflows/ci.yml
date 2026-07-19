@@ -12,16 +12,15 @@ jobs:
     name: v2.0 visa-mcp shim + backend smoke
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
       - name: Install (visa-mcp + lab-executor-mcp from PyPI / git)
         run: |
           python -m pip install --upgrade pip
-          # v2.0.0-rc1: lab-executor-mcp >=2.24.0 を依存として install (v2.7.0: control plane 統合)
-          # (PyPI 公開前は git tag から install する)
-          pip install "git+https://github.com/TECTOS-JP/lab-executor-mcp.git@v2.27.0#egg=lab-executor-mcp"
+          # lab-executor-mcp は PyPI 公開済 (2.35.1~)。pyproject の
+          # 依存指定どおりに解決させる (git pin をやめた)。
           pip install -e .
           pip install pytest pytest-asyncio pytest-mock pyvisa
       - name: import smoke
@@ -35,8 +34,8 @@ jobs:
     name: wheel build verification
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
       - name: Build wheel
@@ -45,7 +44,6 @@ jobs:
           python -m build
       - name: Install wheel + import
         run: |
-          pip install "git+https://github.com/TECTOS-JP/lab-executor-mcp.git@v2.27.0#egg=lab-executor-mcp"
           pip install dist/*.whl
           python -c "import visa_mcp; print('visa-mcp:', visa_mcp.__version__)"
           python -c "from visa_mcp.backends.pyvisa_backend import PyVisaBackend; b=PyVisaBackend(); print('PyVisaBackend OK')"

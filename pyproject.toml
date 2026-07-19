@@ -49,6 +49,21 @@ Issues = "https://github.com/TECTOS-JP/visa-mcp/issues"
 [project.scripts]
 visa-mcp = "visa_mcp.cli:main"
 
+[tool.hatch.build.targets.sdist]
+# 既定では作業ディレクトリの全てが入り、ローカルの venv / パッケージ
+# マネージャキャッシュ (third-party バイナリを含む) まで再配布しかねない。
+# 必要物のみを allowlist 指定する。先頭 "/" でルートに固定すること
+# (裸の "LICENSE" 等はどの階層にもマッチし site-packages を巻き込む)。
+include = [
+    "/src/visa_mcp",
+    "/tests",
+    "/docs",
+    "/README.md",
+    "/CHANGELOG.md",
+    "/LICENSE",
+    "/pyproject.toml",
+]
+
 [tool.hatch.build.targets.wheel]
 # `packages = ["src/visa_mcp"]` により src/visa_mcp 配下の全ファイル
 # (templates/, builtin_instruments/ の YAML 含む) が wheel に入る。

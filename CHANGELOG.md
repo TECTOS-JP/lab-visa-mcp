@@ -1,8 +1,23 @@
 # 変更履歴
 
-## v2.7.0 — 実機 serve でも Web UI M4 コントロールプレーンを有効化
+## v2.7.0 — 実機 serve でも Web UI M4 コントロールプレーンを有効化 / 初の PyPI 公開
 
 合言葉: **「実機の関所にも、同じ鍵の受け渡し口を付ける」**
+
+### パッケージング (初の PyPI 公開)
+
+- **PyPI 公開**: `pip install visa-mcp` で導入可能に。依存する
+  `lab-executor-mcp` も PyPI 公開済 (2.35.1~) となったため、pyproject の
+  バージョン指定どおりに解決される。
+- CI が lab-executor-mcp を **git tag pin から PyPI 解決へ切り替え**
+  (`git+https://...@v2.27.0` を廃止)。実利用者と同じ依存解決経路を CI が通る。
+- `[tool.hatch.build.targets.sdist]` を allowlist 指定で追加。既定では作業
+  ディレクトリ全体が sdist に入り、ローカルの venv / パッケージマネージャ
+  キャッシュ (third-party バイナリを含む) まで再配布しかねないため。
+  先頭 `/` でルートに固定している (裸の `LICENSE` 等はどの階層にもマッチする)。
+- Trusted Publishing (GitHub Actions OIDC) の publish workflow を追加。
+  sdist への混入を機械で弾くガード付き。
+- GitHub Actions を Node 24 対応版へ更新。
 
 ### 背景
 

@@ -81,3 +81,11 @@ Desktop.ini
 
 # Obsidian vault config
 .obsidian/
+
+# ツール / パッケージマネージャのローカルキャッシュ
+.uv-cache/
+.uv/
+.venv-*/
+venv-*/
+.ruff_cache/
+.mypy_cache/
