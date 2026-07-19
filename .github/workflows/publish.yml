@@ -68,7 +68,7 @@ jobs:
           print(f"sdist OK: {len(names)} files")
           PY
 
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v6
         with:
           name: dist
           path: dist/
@@ -82,7 +82,7 @@ jobs:
     permissions:
       id-token: write        # Trusted Publishing (OIDC) に必須
     steps:
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v7
         with:
           name: dist
           path: dist/
@@ -101,7 +101,7 @@ jobs:
     permissions:
       id-token: write        # Trusted Publishing (OIDC) に必須
     steps:
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v7
         with:
           name: dist
           path: dist/
