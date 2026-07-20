@@ -46,6 +46,9 @@ dev = [
 Homepage = "https://github.com/TECTOS-JP/visa-mcp"
 Issues = "https://github.com/TECTOS-JP/visa-mcp/issues"
 
+[project.entry-points."lab_executor.backends"]
+visa = "visa_mcp.discovery:make_backend"
+
 [project.scripts]
 visa-mcp = "visa_mcp.cli:main"
 
@@ -76,6 +79,7 @@ packages = ["src/visa_mcp"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+norecursedirs = ["_legacy_v1_archived"]
 markers = [
     "hardware: 実機が接続されている環境でのみ実行 (pytest -m hardware)",
 ]

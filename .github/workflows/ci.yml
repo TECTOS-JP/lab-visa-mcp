@@ -2,33 +2,49 @@ name: CI
 
 on:
   push:
-    branches: [main]
   pull_request:
-    branches: [main]
-  workflow_dispatch:
 
 jobs:
-  test:
-    name: v2.0 visa-mcp shim + backend smoke
+  unit:
+    name: Unit and BEF conformance
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
-      - name: Install (visa-mcp + lab-executor-mcp from PyPI / git)
-        run: |
-          python -m pip install --upgrade pip
-          # lab-executor-mcp は PyPI 公開済 (2.35.1~)。pyproject の
-          # 依存指定どおりに解決させる (git pin をやめた)。
-          pip install -e .
-          pip install pytest pytest-asyncio pytest-mock pyvisa
-      - name: import smoke
-        run: |
-          python -c "import visa_mcp; print('visa-mcp:', visa_mcp.__version__)"
-          python -c "import lab_executor; print('lab-executor-mcp:', lab_executor.__version__)"
-      - name: shim + backend smoke tests (v2.0)
-        run: pytest tests/test_v200_shim.py -v
+      - name: Install package and development dependencies
+        run: python -m pip install -e ".[dev]"
+      - name: BEF conformance kit
+        run: python -m pytest -q tests/test_backend_conformance.py
+      - name: Unit test suite
+        run: python -m pytest -q -m "not hardware"
+
+  latest-release-integration:
+    name: lab-executor latest release integration
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      # Project dependencies resolve lab-executor-mcp from PyPI.
+      - run: python -m pip install -e ".[dev]"
+      - run: python -m pytest -q tests/test_backend_conformance.py tests/test_backend_discovery.py
+
+  main-compatibility-smoke:
+    name: lab-executor main compatibility smoke
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - run: python -m pip install -e ".[dev]"
+      - name: Replace release runtime with development main
+        run: python -m pip install --upgrade --force-reinstall "lab-executor-mcp @ git+https://github.com/TECTOS-JP/lab-executor-mcp@main"
+      - run: python -m pytest -q tests/test_backend_conformance.py tests/test_backend_discovery.py
 
   build:
     name: wheel build verification
@@ -40,10 +56,10 @@ jobs:
           python-version: "3.11"
       - name: Build wheel
         run: |
-          pip install build
+          python -m pip install build
           python -m build
       - name: Install wheel + import
         run: |
-          pip install dist/*.whl
+          python -m pip install dist/*.whl
           python -c "import visa_mcp; print('visa-mcp:', visa_mcp.__version__)"
-          python -c "from visa_mcp.backends.pyvisa_backend import PyVisaBackend; b=PyVisaBackend(); print('PyVisaBackend OK')"
+          python -c "from visa_mcp.discovery import make_backend; print(make_backend().prefixes)"
