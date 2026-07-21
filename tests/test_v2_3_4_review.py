@@ -11,8 +11,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from visa_mcp.session_store import SessionStore, SessionStoreLockTimeout
-from visa_mcp.session_manager import SessionManager
+from lab_visa_mcp.session_store import SessionStore, SessionStoreLockTimeout
+from lab_visa_mcp.session_manager import SessionManager
 
 
 @pytest.fixture
@@ -56,7 +56,7 @@ def test_bind_manually_sets_persisted_false_on_lock_timeout(
     store = SessionStore(tmp_path / "s.json")
     sm = SessionManager(fake_visa, fake_registry, store=store)
 
-    import visa_mcp.session_store as mod
+    import lab_visa_mcp.session_store as mod
 
     @contextlib.contextmanager
     def fake_lock(*a, **k):
@@ -105,7 +105,7 @@ def test_clear_session_reports_store_error_on_lock_timeout(
     sm = SessionManager(fake_visa, fake_registry, store=store)
     sm.bind_manually("GPIB0::2::INSTR", "Yokogawa", "7563")
 
-    import visa_mcp.session_store as mod
+    import lab_visa_mcp.session_store as mod
 
     @contextlib.contextmanager
     def fake_lock(*a, **k):
@@ -133,6 +133,6 @@ def test_clear_session_no_error_on_success(
 
 
 def test_v2_3_4_version():
-    import visa_mcp
-    parts = visa_mcp.__version__.split(".")
+    import lab_visa_mcp
+    parts = lab_visa_mcp.__version__.split(".")
     assert tuple(int(p) for p in parts[:3]) >= (2, 3, 4)

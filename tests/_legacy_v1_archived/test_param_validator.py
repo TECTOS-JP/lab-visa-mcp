@@ -1,6 +1,6 @@
 import pytest
-from visa_mcp.utils.param_validator import validate_and_build_scpi, ParameterValidationError
-from visa_mcp.models.instrument_def import CommandDefinition, ParameterDefinition
+from lab_visa_mcp.utils.param_validator import validate_and_build_scpi, ParameterValidationError
+from lab_visa_mcp.models.instrument_def import CommandDefinition, ParameterDefinition
 
 
 def make_cmd(scpi: str, params: list[dict]) -> CommandDefinition:

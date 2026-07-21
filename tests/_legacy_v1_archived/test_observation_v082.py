@@ -13,15 +13,15 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 import yaml
 
-from visa_mcp.job import JobManager, JobStore
-from visa_mcp.job.state_machine import JobStatus, is_terminal
-from visa_mcp.models.instrument_def import InstrumentDefinition
-from visa_mcp.observation import (
+from lab_visa_mcp.job import JobManager, JobStore
+from lab_visa_mcp.job.state_machine import JobStatus, is_terminal
+from lab_visa_mcp.models.instrument_def import InstrumentDefinition
+from lab_visa_mcp.observation import (
     PHASE_ENUM, compute_current_phase, event_kind, event_severity,
     normalize_event, build_run_summary,
 )
-from visa_mcp.session_manager import InstrumentSession
-from visa_mcp.system_config import SystemConfig, InstrumentBinding
+from lab_visa_mcp.session_manager import InstrumentSession
+from lab_visa_mcp.system_config import SystemConfig, InstrumentBinding
 
 
 YAML_PSU = """
@@ -170,7 +170,7 @@ async def test_get_experiment_timeline_excludes_monitor_samples_by_default(
     _, _, mgr, _, store, _ = _setup(tmp_path)
     try:
         # job 作成 + monitor_sample / step イベント手動投入
-        from visa_mcp.observation import normalize_event, filter_kinds
+        from lab_visa_mcp.observation import normalize_event, filter_kinds
         # 直接 store にイベントを書く
         rec = store.create_job(
             job_id="job_x", owner="", resource_name="psu0",
@@ -208,7 +208,7 @@ async def test_get_experiment_timeline_filters_by_kind(tmp_path):
         store.record_event("job_y", "target_started",
                            payload={"target_id": "t1"})
 
-        from visa_mcp.observation import normalize_event, filter_kinds
+        from lab_visa_mcp.observation import normalize_event, filter_kinds
         events = store.list_events("job_y")
         norm = [normalize_event(e) for e in events]
         only_failure = filter_kinds(norm, kinds=["failure"])
@@ -263,7 +263,7 @@ async def test_get_job_live_view_running_wait_for_stable(tmp_path, monkeypatch):
         )
 
         # runtime に progress を模擬注入
-        from visa_mcp.job.manager import _JobRuntime
+        from lab_visa_mcp.job.manager import _JobRuntime
         import asyncio as _asyncio
         # ダミー runtime (cancel_mode=None / 完了済み task)
         task = _asyncio.create_task(_asyncio.sleep(0.001))
@@ -282,7 +282,7 @@ async def test_get_job_live_view_running_wait_for_stable(tmp_path, monkeypatch):
 
         # observation.compute_current_phase + tools/observation の組み合わせを再現
         events = store.list_events("job_lv")
-        from visa_mcp.observation import compute_current_phase
+        from lab_visa_mcp.observation import compute_current_phase
         final = mgr.get("job_lv")
         prog = mgr.get_progress("job_lv")
         phase = compute_current_phase(
@@ -296,7 +296,7 @@ async def test_get_job_live_view_running_wait_for_stable(tmp_path, monkeypatch):
         assert phase == "waiting_for_stable"
 
         # MCP tool 経由 (実機関係なし)
-        from visa_mcp.tools.observation import register_tools
+        from lab_visa_mcp.tools.observation import register_tools
         from fastmcp import FastMCP
         mcp_app = FastMCP("test")
         register_tools(mcp_app, mgr)

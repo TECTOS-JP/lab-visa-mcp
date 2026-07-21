@@ -16,12 +16,12 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 import yaml
 
-from visa_mcp import stability
-from visa_mcp.job import JobManager, JobStore
-from visa_mcp.job.state_machine import JobStatus
-from visa_mcp.models.instrument_def import InstrumentDefinition
-from visa_mcp.session_manager import InstrumentSession
-from visa_mcp.system_config import SystemConfig, InstrumentBinding
+from lab_visa_mcp import stability
+from lab_visa_mcp.job import JobManager, JobStore
+from lab_visa_mcp.job.state_machine import JobStatus
+from lab_visa_mcp.models.instrument_def import InstrumentDefinition
+from lab_visa_mcp.session_manager import InstrumentSession
+from lab_visa_mcp.system_config import SystemConfig, InstrumentBinding
 
 
 ROOT = Path(__file__).parent.parent
@@ -33,9 +33,9 @@ ROOT = Path(__file__).parent.parent
 
 
 def test_version_is_v1_1_0():
-    import visa_mcp
+    import lab_visa_mcp
     # v1.1.x 以降の v1.x 系列を許容 (v1.2+ で再 bump)
-    assert visa_mcp.__version__.startswith("1.")
+    assert lab_visa_mcp.__version__.startswith("1.")
 
 
 # =========================================================
@@ -67,7 +67,7 @@ def test_backend_abstraction_doc_exists():
 
 
 def test_instrument_backend_protocol_importable():
-    from visa_mcp.backends import InstrumentBackend
+    from lab_visa_mcp.backends import InstrumentBackend
     assert hasattr(InstrumentBackend, "__call__") or True
     # Protocol の代表 method が定義されている
     assert "list_resources" in InstrumentBackend.__dict__ or \
@@ -78,7 +78,7 @@ def test_instrument_backend_protocol_importable():
 def test_existing_visa_managers_are_duck_compatible_with_backend():
     """既存 VisaManager / MockVisaManager は明示継承していないが
     duck-typed compatible である (将来 adapter 化のための存在証明)"""
-    from visa_mcp.testing.mock_instruments import MockVisaManager
+    from lab_visa_mcp.testing.mock_instruments import MockVisaManager
     m = MockVisaManager()
     # 必要な async method が存在する
     assert hasattr(m, "list_resources")
@@ -166,13 +166,13 @@ def _setup_with_bundle(tmp_path):
 async def test_validate_bundle_success(tmp_path, monkeypatch):
     monkeypatch.setenv("VISA_MCP_SAFETY_MODE", "permissive")
     monkeypatch.setattr(
-        "visa_mcp.tools.export.DEFAULT_EXPORT_DIR",
+        "lab_visa_mcp.tools.export.DEFAULT_EXPORT_DIR",
         tmp_path / "exports",
     )
     mgr, store = _setup_with_bundle(tmp_path)
     try:
         from fastmcp import FastMCP
-        from visa_mcp.tools.export import register_tools
+        from lab_visa_mcp.tools.export import register_tools
         mcp = FastMCP("t")
         register_tools(mcp, mgr)
         export_tool = await mcp.get_tool("export_experiment_bundle")
@@ -201,7 +201,7 @@ async def test_validate_bundle_missing_manifest(tmp_path, monkeypatch):
         with zipfile.ZipFile(broken, "w") as zf:
             zf.writestr("plan.json", "{}")
         from fastmcp import FastMCP
-        from visa_mcp.tools.export import register_tools
+        from lab_visa_mcp.tools.export import register_tools
         mcp = FastMCP("t")
         register_tools(mcp, mgr)
         tool = await mcp.get_tool("validate_experiment_bundle")
@@ -221,13 +221,13 @@ async def test_validate_bundle_checksum_mismatch(tmp_path, monkeypatch):
     """重要: 中身 1 byte 改ざんで sha256 mismatch を検出"""
     monkeypatch.setenv("VISA_MCP_SAFETY_MODE", "permissive")
     monkeypatch.setattr(
-        "visa_mcp.tools.export.DEFAULT_EXPORT_DIR",
+        "lab_visa_mcp.tools.export.DEFAULT_EXPORT_DIR",
         tmp_path / "exports",
     )
     mgr, store = _setup_with_bundle(tmp_path)
     try:
         from fastmcp import FastMCP
-        from visa_mcp.tools.export import register_tools
+        from lab_visa_mcp.tools.export import register_tools
         mcp = FastMCP("t")
         register_tools(mcp, mgr)
         export_tool = await mcp.get_tool("export_experiment_bundle")
@@ -265,13 +265,13 @@ async def test_validate_bundle_checksum_mismatch(tmp_path, monkeypatch):
 async def test_inspect_bundle_summary(tmp_path, monkeypatch):
     monkeypatch.setenv("VISA_MCP_SAFETY_MODE", "permissive")
     monkeypatch.setattr(
-        "visa_mcp.tools.export.DEFAULT_EXPORT_DIR",
+        "lab_visa_mcp.tools.export.DEFAULT_EXPORT_DIR",
         tmp_path / "exports",
     )
     mgr, store = _setup_with_bundle(tmp_path)
     try:
         from fastmcp import FastMCP
-        from visa_mcp.tools.export import register_tools
+        from lab_visa_mcp.tools.export import register_tools
         mcp = FastMCP("t")
         register_tools(mcp, mgr)
         export_tool = await mcp.get_tool("export_experiment_bundle")
@@ -299,7 +299,7 @@ async def test_validate_bundle_not_found(tmp_path, monkeypatch):
     mgr, store = _setup_with_bundle(tmp_path)
     try:
         from fastmcp import FastMCP
-        from visa_mcp.tools.export import register_tools
+        from lab_visa_mcp.tools.export import register_tools
         mcp = FastMCP("t")
         register_tools(mcp, mgr)
         tool = await mcp.get_tool("validate_experiment_bundle")
@@ -324,7 +324,7 @@ async def test_validate_bundle_unsupported_version_warning(
         files = {
             "manifest.json": json.dumps({
                 "bundle_version": "9.9",
-                "visa_mcp_version": "9.9.9",
+                "lab_visa_mcp_version": "9.9.9",
                 "job_id": "j",
                 "checksums": {},
             }),
@@ -338,7 +338,7 @@ async def test_validate_bundle_unsupported_version_warning(
             for k, v in files.items():
                 zf.writestr(k, v)
         from fastmcp import FastMCP
-        from visa_mcp.tools.export import register_tools
+        from lab_visa_mcp.tools.export import register_tools
         mcp = FastMCP("t")
         register_tools(mcp, mgr)
         tool = await mcp.get_tool("validate_experiment_bundle")
@@ -363,8 +363,8 @@ async def test_validate_bundle_unsupported_version_warning(
 REPO_TEXT_TARGETS_V11 = [
     "docs/naming_and_repository_strategy.md",
     "docs/backend_abstraction.md",
-    "src/visa_mcp/backends/base.py",
-    "src/visa_mcp/backends/__init__.py",
+    "src/lab_visa_mcp/backends/base.py",
+    "src/lab_visa_mcp/backends/__init__.py",
     "tests/test_v11.py",
 ]
 

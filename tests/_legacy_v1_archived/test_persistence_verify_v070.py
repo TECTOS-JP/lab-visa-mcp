@@ -14,15 +14,15 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 import yaml
 
-from visa_mcp.experiment_ir import CommandStep, Plan
-from visa_mcp.group import FailurePolicy, TargetExecution
-from visa_mcp.group.executor import GroupExecutor
-from visa_mcp.job import CancelMode, JobManager, JobStore
-from visa_mcp.job.state_machine import JobStatus, is_terminal
-from visa_mcp.models.instrument_def import InstrumentDefinition
-from visa_mcp.session_manager import InstrumentSession
-from visa_mcp.state_query import query_all_state, query_state_item
-from visa_mcp.system_config import SystemConfig, InstrumentBinding
+from lab_visa_mcp.experiment_ir import CommandStep, Plan
+from lab_visa_mcp.group import FailurePolicy, TargetExecution
+from lab_visa_mcp.group.executor import GroupExecutor
+from lab_visa_mcp.job import CancelMode, JobManager, JobStore
+from lab_visa_mcp.job.state_machine import JobStatus, is_terminal
+from lab_visa_mcp.models.instrument_def import InstrumentDefinition
+from lab_visa_mcp.session_manager import InstrumentSession
+from lab_visa_mcp.state_query import query_all_state, query_state_item
+from lab_visa_mcp.system_config import SystemConfig, InstrumentBinding
 
 
 YAML_PSU_WITH_VERIFY = """
@@ -231,7 +231,7 @@ async def test_target_runs_recorded_for_map_job(tmp_path, monkeypatch):
             f"a{i}": InstrumentBinding(resource=f"psu{i}") for i in range(2)
         },
     )
-    from visa_mcp.system_config import ExperimentUnit
+    from lab_visa_mcp.system_config import ExperimentUnit
     sys_cfg.experiment_units = {
         f"u{i}": ExperimentUnit(bindings={"psu": f"a{i}"}) for i in range(2)
     }
@@ -275,7 +275,7 @@ async def test_target_runs_recorded_for_map_job(tmp_path, monkeypatch):
 async def test_verify_numeric_success(tmp_path, monkeypatch):
     """write → readback で値が一致 → verified=True"""
     monkeypatch.setenv("VISA_MCP_SAFETY_MODE", "permissive")
-    from visa_mcp.step_executor import execute_command_step
+    from lab_visa_mcp.step_executor import execute_command_step
 
     visa = MagicMock()
     visa.write = AsyncMock(return_value=None)
@@ -296,7 +296,7 @@ async def test_verify_numeric_success(tmp_path, monkeypatch):
 async def test_verify_numeric_mismatch_strict_fails_step(tmp_path, monkeypatch):
     """**必須**: strict mode + verify 失敗で step が failed"""
     monkeypatch.setenv("VISA_MCP_SAFETY_MODE", "strict")
-    from visa_mcp.step_executor import execute_command_step
+    from lab_visa_mcp.step_executor import execute_command_step
 
     visa = MagicMock()
     visa.write = AsyncMock(return_value=None)
@@ -319,7 +319,7 @@ async def test_verify_numeric_mismatch_strict_fails_step(tmp_path, monkeypatch):
 async def test_verify_numeric_mismatch_advisory_warns_only(tmp_path, monkeypatch):
     """advisory mode では verify 失敗でも step success (verified=False のみ)"""
     monkeypatch.setenv("VISA_MCP_SAFETY_MODE", "advisory")
-    from visa_mcp.step_executor import execute_command_step
+    from lab_visa_mcp.step_executor import execute_command_step
 
     visa = MagicMock()
     visa.write = AsyncMock(return_value=None)

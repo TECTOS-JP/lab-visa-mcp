@@ -2,7 +2,7 @@
 import pytest
 from pydantic import ValidationError
 
-from visa_mcp.experiment_ir import CommandStep, WaitStep, Plan
+from lab_visa_mcp.experiment_ir import CommandStep, WaitStep, Plan
 
 
 # === CommandStep ===

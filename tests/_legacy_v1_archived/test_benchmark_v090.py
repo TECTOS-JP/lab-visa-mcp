@@ -6,13 +6,13 @@ from pathlib import Path
 
 import pytest
 
-from visa_mcp.testing.benchmark_task import (
+from lab_visa_mcp.testing.benchmark_task import (
     BenchmarkTask, load_benchmark_task, load_benchmark_tasks,
 )
-from visa_mcp.testing.mock_instruments import (
+from lab_visa_mcp.testing.mock_instruments import (
     InstrumentScenario, MockVisaManager,
 )
-from visa_mcp.testing.benchmark_runner import run_task_file
+from lab_visa_mcp.testing.benchmark_runner import run_task_file
 
 ROOT = Path(__file__).parent.parent
 BENCHMARKS = ROOT / "benchmarks"
@@ -79,7 +79,7 @@ async def test_mock_visa_echo():
 async def test_mock_visa_timeout_raises():
     m = MockVisaManager()
     m.register("r1", InstrumentScenario(mode="timeout"))
-    from visa_mcp.visa_manager import VisaTimeoutError
+    from lab_visa_mcp.visa_manager import VisaTimeoutError
     with pytest.raises(VisaTimeoutError):
         await m.query("r1", "X?")
 
@@ -91,7 +91,7 @@ async def test_mock_flaky_recovers():
     m.register("r1", InstrumentScenario(
         mode="flaky", timeout_after_calls=2, value="ok",
     ))
-    from visa_mcp.visa_manager import VisaTimeoutError
+    from lab_visa_mcp.visa_manager import VisaTimeoutError
     with pytest.raises(VisaTimeoutError):
         await m.query("r1", "X?")
     with pytest.raises(VisaTimeoutError):

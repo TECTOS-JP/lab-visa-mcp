@@ -8,8 +8,8 @@ import pytest
 
 from lab_executor.backends import BackendRegistration
 
-from visa_mcp.backends.pyvisa_backend import PyVisaBackend
-from visa_mcp.discovery import VISA_RESOURCE_PREFIXES, make_backend
+from lab_visa_mcp.backends.pyvisa_backend import PyVisaBackend
+from lab_visa_mcp.discovery import VISA_RESOURCE_PREFIXES, make_backend
 
 
 def test_factory_returns_default_pyvisa_registration():
@@ -30,10 +30,10 @@ def test_factory_rejects_unknown_or_malformed_config():
 def test_deprecated_base_module_reexports_runtime_protocol():
     from lab_executor.backends.base import InstrumentBackend as RuntimeProtocol
 
-    sys.modules.pop("visa_mcp.backends.base", None)
+    sys.modules.pop("lab_visa_mcp.backends.base", None)
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        from visa_mcp.backends.base import InstrumentBackend as ShimProtocol
+        from lab_visa_mcp.backends.base import InstrumentBackend as ShimProtocol
 
     assert ShimProtocol is RuntimeProtocol
     assert any(

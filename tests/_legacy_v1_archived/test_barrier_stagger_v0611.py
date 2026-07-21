@@ -12,12 +12,12 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 import yaml
 
-from visa_mcp.experiment_ir import BarrierStep, CommandStep, Plan
-from visa_mcp.group import FailurePolicy, TargetExecution
-from visa_mcp.group.barrier import BarrierCoordinator
-from visa_mcp.group.executor import GroupExecutor
-from visa_mcp.models.instrument_def import InstrumentDefinition
-from visa_mcp.session_manager import InstrumentSession
+from lab_visa_mcp.experiment_ir import BarrierStep, CommandStep, Plan
+from lab_visa_mcp.group import FailurePolicy, TargetExecution
+from lab_visa_mcp.group.barrier import BarrierCoordinator
+from lab_visa_mcp.group.executor import GroupExecutor
+from lab_visa_mcp.models.instrument_def import InstrumentDefinition
+from lab_visa_mcp.session_manager import InstrumentSession
 
 
 YAML_PSU = """

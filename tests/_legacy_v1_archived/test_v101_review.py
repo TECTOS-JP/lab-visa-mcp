@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from visa_mcp import stability
+from lab_visa_mcp import stability
 
 ROOT = Path(__file__).parent.parent
 
@@ -27,8 +27,8 @@ ROOT = Path(__file__).parent.parent
 
 def test_version_v1_0_1():
     """v1.0.1 で導入したテスト。v1.1.0 以降でも v1.0.x 系列であれば許容"""
-    import visa_mcp
-    assert visa_mcp.__version__.startswith("1.")
+    import lab_visa_mcp
+    assert lab_visa_mcp.__version__.startswith("1.")
 
 
 # =========================================================
@@ -48,7 +48,7 @@ REPO_TEXT_TARGETS_V1 = [
     "schemas/system_config.schema.json",
     "schemas/dsl.schema.json",
     "schemas/benchmark_task.schema.json",
-    "src/visa_mcp/stability.py",
+    "src/lab_visa_mcp/stability.py",
 ]
 
 

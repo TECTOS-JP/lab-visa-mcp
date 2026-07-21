@@ -25,11 +25,11 @@ import yaml
 
 
 # rewrite ルール:
-#   visa_mcp.<lab-executor module>  →  lab_executor.<...>
+#   lab_visa_mcp.<lab-executor module>  →  lab_executor.<...>
 # backends/base.py は shared → lab-executor 側 source of truth
 # backends/pyvisa_backend.py は visa-mcp 側に残るので copy しない
 # backends/mock_backend.py は lab-executor 側
-REWRITE_FROM = "visa_mcp."
+REWRITE_FROM = "lab_visa_mcp."
 REWRITE_TO = "lab_executor."
 
 
@@ -57,11 +57,11 @@ def module_to_relpath(src_root: Path, module: str) -> Path:
 
 
 def rewrite_text(text: str, lab_modules: set[str]) -> str:
-    """`visa_mcp.<lab>` / `from visa_mcp import <lab_attr>` を
+    """`lab_visa_mcp.<lab>` / `from lab_visa_mcp import <lab_attr>` を
     `lab_executor.<...>` に置換。
-    visa-mcp / shared owner の `visa_mcp.<...>` は維持。"""
-    # 1) `visa_mcp.<lab>...` 形式の dotted reference
-    pat = re.compile(r"\b(visa_mcp(?:\.[A-Za-z_][A-Za-z0-9_]*)+)\b")
+    visa-mcp / shared owner の `lab_visa_mcp.<...>` は維持。"""
+    # 1) `lab_visa_mcp.<lab>...` 形式の dotted reference
+    pat = re.compile(r"\b(lab_visa_mcp(?:\.[A-Za-z_][A-Za-z0-9_]*)+)\b")
 
     def _sub(m):
         target = m.group(1)
@@ -72,11 +72,11 @@ def rewrite_text(text: str, lab_modules: set[str]) -> str:
 
     text2 = pat.sub(_sub, text)
 
-    # 2) `from visa_mcp import <name>` (bare package import of attribute).
+    # 2) `from lab_visa_mcp import <name>` (bare package import of attribute).
     #    <name> が lab-executor owner の sub-module / attr であれば
     #    `from lab_executor import <name>` に書き換える。
     bare_pat = re.compile(
-        r"^(from visa_mcp import )([A-Za-z_][A-Za-z0-9_]*(?:\s+as\s+\w+)?"
+        r"^(from lab_visa_mcp import )([A-Za-z_][A-Za-z0-9_]*(?:\s+as\s+\w+)?"
         r"(?:\s*,\s*[A-Za-z_][A-Za-z0-9_]*(?:\s+as\s+\w+)?)*)$",
         re.MULTILINE,
     )
@@ -93,9 +93,9 @@ def rewrite_text(text: str, lab_modules: set[str]) -> str:
     text2 = bare_pat.sub(_bare_sub, text2)
 
     # backends/base / mock は lab-executor 側 source of truth
-    text2 = text2.replace("visa_mcp.backends.base",
+    text2 = text2.replace("lab_visa_mcp.backends.base",
                            "lab_executor.backends.base")
-    text2 = text2.replace("visa_mcp.backends.mock_backend",
+    text2 = text2.replace("lab_visa_mcp.backends.mock_backend",
                            "lab_executor.backends.mock_backend")
     return text2
 
@@ -105,7 +105,7 @@ def copy_module(src_root: Path, dst_root: Path, module: str,
     src_path = module_to_relpath(src_root, module)
     if not src_path.exists():
         return False
-    parts = module.split(".")[1:]  # drop "visa_mcp"
+    parts = module.split(".")[1:]  # drop "lab_visa_mcp"
     if src_path.name == "__init__.py":
         dst = dst_root / "src" / "lab_executor" / Path(*parts) / "__init__.py"
     else:
@@ -167,8 +167,8 @@ def patch_relative_backend_imports(dst_root: Path) -> int:
             s = ln.strip()
             if (s.startswith("from .session_manager ")
                     or s.startswith("from .visa_manager ")
-                    or s.startswith("from visa_mcp.session_manager ")
-                    or s.startswith("from visa_mcp.visa_manager ")):
+                    or s.startswith("from lab_visa_mcp.session_manager ")
+                    or s.startswith("from lab_visa_mcp.visa_manager ")):
                 removed_lines.append(ln)
                 continue
             new_lines.append(ln)
@@ -198,11 +198,11 @@ def patch_relative_backend_imports(dst_root: Path) -> int:
             "# v2.0: backend layer は visa-mcp / shim 経由。型ヒント目的\n"
             "# は TYPE_CHECKING、VisaError は ImportError fallback。\n"
             "if TYPE_CHECKING:\n"
-            "    from visa_mcp.session_manager import InstrumentSession\n"
-            "    from visa_mcp.visa_manager import VisaManager\n"
+            "    from lab_visa_mcp.session_manager import InstrumentSession\n"
+            "    from lab_visa_mcp.visa_manager import VisaManager\n"
             "\n"
             "try:\n"
-            "    from visa_mcp.visa_manager import VisaError\n"
+            "    from lab_visa_mcp.visa_manager import VisaError\n"
             "except ImportError:\n"
             "    class VisaError(Exception):  # type: ignore[no-redef]\n"
             "        \"\"\"visa-mcp 不在時の VisaError 代替\"\"\"\n"
@@ -307,7 +307,7 @@ pip install visa-mcp     # PyVISA backend + lab-executor-mcp runtime
 - v1.x までは `visa-mcp` 1 リポジトリで提供されていた
 - v2.0 で **backend (visa-mcp) と runtime (lab-executor-mcp) を分離**
 - MCP tool / DSL schema / extension pack 形式は完全互換
-- 旧 `from visa_mcp.extension import ...` は v2.0 で
+- 旧 `from lab_visa_mcp.extension import ...` は v2.0 で
   DeprecationWarning 付きで動作
 
 詳細: `docs/v2_migration.md`
@@ -459,8 +459,8 @@ pip install --upgrade visa-mcp
 旧 import path はすべて動作する (`DeprecationWarning` 付き):
 
 ```python
-from visa_mcp.extension import ExtensionManifest  # DeprecationWarning
-from visa_mcp.dsl import validate_experiment_plan  # DeprecationWarning
+from lab_visa_mcp.extension import ExtensionManifest  # DeprecationWarning
+from lab_visa_mcp.dsl import validate_experiment_plan  # DeprecationWarning
 ```
 
 推奨される新 import:
@@ -522,7 +522,7 @@ v1.x で作った bundle は v2.0 で `validate_experiment_bundle` /
 
 ## トラブルシューティング
 
-### `ImportError: cannot import name X from visa_mcp...`
+### `ImportError: cannot import name X from lab_visa_mcp...`
 
 v2.0 で完全に削除された API は無い。`DeprecationWarning` のみ。
 このエラーは extension pack の dependency 不整合の可能性が高い。
@@ -668,8 +668,8 @@ def main(argv: list[str] | None = None) -> int:
 
     src_root = Path(args.src).resolve()
     dst_root = Path(args.dst).resolve()
-    if not (src_root / "src" / "visa_mcp").exists():
-        print(f"ERROR: {src_root} に src/visa_mcp が無い", file=sys.stderr)
+    if not (src_root / "src" / "lab_visa_mcp").exists():
+        print(f"ERROR: {src_root} に src/lab_visa_mcp が無い", file=sys.stderr)
         return 1
     if not dst_root.exists():
         print(f"ERROR: {dst_root} が存在しない", file=sys.stderr)
@@ -687,8 +687,8 @@ def main(argv: list[str] | None = None) -> int:
     by_owner = collect_modules(manifest)
     lab_modules = by_owner.get("lab-executor-mcp", set())
     # backends.base / backends.mock_backend は lab-executor 側へ送る
-    lab_modules.add("visa_mcp.backends.base")
-    lab_modules.add("visa_mcp.backends.mock_backend")
+    lab_modules.add("lab_visa_mcp.backends.base")
+    lab_modules.add("lab_visa_mcp.backends.mock_backend")
     # split owner module も lab-executor 側へ copy する (rc1 で実分割
     # まで進めない場合の現実解 - lab_executor_part を含めて全体を
     # コピーし、v2.1+ で更に分割を検討)。
@@ -696,10 +696,10 @@ def main(argv: list[str] | None = None) -> int:
     # visa-mcp 側に残すべき split module を除外 (server / cli / __init__ /
     # backends / tools.commands は visa-mcp 側にも置く)
     visa_only_splits = {
-        "visa_mcp",  # top-level shim
-        "visa_mcp.server",  # visa-mcp serve composition root
-        "visa_mcp.cli",  # visa-mcp 側 CLI shim
-        "visa_mcp.backends",  # package init は両方
+        "lab_visa_mcp",  # top-level shim
+        "lab_visa_mcp.server",  # visa-mcp serve composition root
+        "lab_visa_mcp.cli",  # visa-mcp 側 CLI shim
+        "lab_visa_mcp.backends",  # package init は両方
     }
     for s in split_modules:
         if s not in visa_only_splits:
@@ -781,7 +781,7 @@ def main(argv: list[str] | None = None) -> int:
         except SyntaxError as e:
             parse_errors.append(
                 f"{py.relative_to(dst_root)}: {e}")
-        # visa_mcp.<lab module> が残っていないか
+        # lab_visa_mcp.<lab module> が残っていないか
         for lab in lab_modules:
             for pat in (f"from {lab}", f"import {lab}"):
                 if pat in text:

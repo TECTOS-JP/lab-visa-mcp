@@ -1,6 +1,6 @@
 import pytest
-from visa_mcp.utils.idn_matcher import parse_idn, match_definition
-from visa_mcp.models.instrument_def import (
+from lab_visa_mcp.utils.idn_matcher import parse_idn, match_definition
+from lab_visa_mcp.models.instrument_def import (
     InstrumentDefinition, MetadataConfig, IdentificationConfig
 )
 

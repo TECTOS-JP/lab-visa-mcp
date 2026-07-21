@@ -21,9 +21,9 @@ from pathlib import Path
 import pytest
 import yaml
 
-from visa_mcp.extension_install import install_definition_pack_from_zip
-from visa_mcp.extension_packaging import package_definition_pack
-from visa_mcp.extension_catalog import (
+from lab_visa_mcp.extension_install import install_definition_pack_from_zip
+from lab_visa_mcp.extension_packaging import package_definition_pack
+from lab_visa_mcp.extension_catalog import (
     inspect_package, list_catalog_installed, quality_signals,
 )
 
@@ -36,8 +36,8 @@ ROOT = Path(__file__).parent.parent
 
 
 def test_version_v1_6_1():
-    import visa_mcp
-    assert visa_mcp.__version__.startswith("1.")
+    import lab_visa_mcp
+    assert lab_visa_mcp.__version__.startswith("1.")
 
 
 # =========================================================
@@ -46,11 +46,11 @@ def test_version_v1_6_1():
 
 
 V16_FILES_FULL = [
-    "src/visa_mcp/extension_catalog.py",
-    "src/visa_mcp/extension_install.py",
-    "src/visa_mcp/extension_packaging.py",
-    "src/visa_mcp/extension.py",
-    "src/visa_mcp/cli.py",
+    "src/lab_visa_mcp/extension_catalog.py",
+    "src/lab_visa_mcp/extension_install.py",
+    "src/lab_visa_mcp/extension_packaging.py",
+    "src/lab_visa_mcp/extension.py",
+    "src/lab_visa_mcp/cli.py",
     "docs/extension_catalog.md",
     "docs/extension_install.md",
     "docs/extension_packaging.md",
@@ -351,7 +351,7 @@ def test_changelog_has_v161_entry():
 
 def _run_cli(*args: str) -> tuple[int, str, str]:
     r = subprocess.run(
-        [sys.executable, "-m", "visa_mcp.cli", *args],
+        [sys.executable, "-m", "lab_visa_mcp.cli", *args],
         capture_output=True, text=True, cwd=str(ROOT),
     )
     return r.returncode, r.stdout, r.stderr

@@ -1,7 +1,7 @@
 """Job state machine のテスト (v0.5.0-rc2)"""
 import pytest
 
-from visa_mcp.job.state_machine import (
+from lab_visa_mcp.job.state_machine import (
     JobStatus,
     CancelMode,
     can_transition,

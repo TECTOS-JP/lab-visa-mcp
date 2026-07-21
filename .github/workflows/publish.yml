@@ -5,8 +5,8 @@ name: Publish to PyPI
 #
 # 初回のみ PyPI 側で Trusted Publisher の登録が必要:
 #   PyPI → Publishing → Add a new pending publisher
-#     PyPI Project Name: visa-mcp
-#     Owner: TECTOS-JP / Repository: visa-mcp
+#     PyPI Project Name: lab-visa-mcp
+#     Owner: TECTOS-JP / Repository: lab-visa-mcp
 #     Workflow: publish.yml / Environment: pypi
 on:
   push:

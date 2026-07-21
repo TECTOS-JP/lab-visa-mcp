@@ -1,5 +1,5 @@
 """response_envelope のテスト (v0.5.0-rc1)"""
-from visa_mcp.response_envelope import make_envelope, make_error, is_envelope
+from lab_visa_mcp.response_envelope import make_envelope, make_error, is_envelope
 
 
 def test_envelope_ok_minimal():

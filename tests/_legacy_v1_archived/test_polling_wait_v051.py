@@ -6,20 +6,20 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 import yaml
 
-from visa_mcp.experiment_ir import (
+from lab_visa_mcp.experiment_ir import (
     WaitForConditionStep, WaitForStableStep, WaitUntilStep, WaitStep,
 )
-from visa_mcp.job import CancelMode, JobManager, JobStore
-from visa_mcp.job.state_machine import JobStatus, is_terminal
-from visa_mcp.models.instrument_def import InstrumentDefinition
-from visa_mcp.polling_executor import (
+from lab_visa_mcp.job import CancelMode, JobManager, JobStore
+from lab_visa_mcp.job.state_machine import JobStatus, is_terminal
+from lab_visa_mcp.models.instrument_def import InstrumentDefinition
+from lab_visa_mcp.polling_executor import (
     execute_wait_for_condition,
     execute_wait_for_stable,
     execute_wait_until,
     extract_value,
 )
-from visa_mcp.session_manager import InstrumentSession
-from visa_mcp.utils.condition import safe_eval_condition, ConditionError
+from lab_visa_mcp.session_manager import InstrumentSession
+from lab_visa_mcp.utils.condition import safe_eval_condition, ConditionError
 
 
 # === safe_eval_condition ===
@@ -233,7 +233,7 @@ async def test_wait_for_stable_success_after_window():
 
 def test_is_stable_rejects_before_window_elapsed():
     """internal review fix: window_s 経過前に min_samples だけ溜まっても stable と判定しない"""
-    from visa_mcp.polling_executor import _is_stable
+    from lab_visa_mcp.polling_executor import _is_stable
     # window_s=60、interval=5 想定で、開始 10 秒で 3 サンプル (全て同値)
     samples = [(0.0, 25.0), (5.0, 25.0), (10.0, 25.0)]
     stable, delta = _is_stable(samples, tolerance=0.1, min_samples=3, window_s=60.0)
@@ -244,7 +244,7 @@ def test_is_stable_rejects_before_window_elapsed():
 
 def test_is_stable_accepts_after_window_elapsed():
     """window_s 経過後に min_samples 以上があり tolerance 以内なら stable"""
-    from visa_mcp.polling_executor import _is_stable
+    from lab_visa_mcp.polling_executor import _is_stable
     # window_s=10、合計 15 秒観測、最後 10 秒に 3 サンプル
     samples = [(0.0, 24.0), (5.0, 25.0), (10.0, 25.0), (15.0, 25.05)]
     stable, delta = _is_stable(samples, tolerance=0.1, min_samples=3, window_s=10.0)
@@ -312,7 +312,7 @@ commands:
     )
     visa = MagicMock()
     calls = {"n": 0}
-    from visa_mcp.visa_manager import VisaError
+    from lab_visa_mcp.visa_manager import VisaError
 
     async def q(*a, **kw):
         calls["n"] += 1
@@ -348,7 +348,7 @@ commands:
         resource_name="TEST::INSTR", idn_response="<x>",
         idn_parsed={}, definition=d,
     )
-    from visa_mcp.visa_manager import VisaError
+    from lab_visa_mcp.visa_manager import VisaError
     visa = MagicMock()
 
     async def q(*a, **kw):

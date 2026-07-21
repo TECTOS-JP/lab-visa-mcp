@@ -25,8 +25,8 @@ ROOT = Path(__file__).parent.parent
 
 
 def test_version_v1_9_1():
-    import visa_mcp
-    assert visa_mcp.__version__.startswith("1.")
+    import lab_visa_mcp
+    assert lab_visa_mcp.__version__.startswith("1.")
 
 
 # =========================================================
@@ -35,11 +35,11 @@ def test_version_v1_9_1():
 
 
 V19_FILES_FULL = [
-    "src/visa_mcp/registry.py",
-    "src/visa_mcp/cli.py",
-    "src/visa_mcp/dev/dependency_report.py",
-    "src/visa_mcp/instrument_authoring.py",
-    "src/visa_mcp/extension_authoring.py",
+    "src/lab_visa_mcp/registry.py",
+    "src/lab_visa_mcp/cli.py",
+    "src/lab_visa_mcp/dev/dependency_report.py",
+    "src/lab_visa_mcp/instrument_authoring.py",
+    "src/lab_visa_mcp/extension_authoring.py",
     "docs/separation/notes.md",
     "docs/instrument_promote_check.md",
     "docs/category_policy.md",
@@ -124,7 +124,7 @@ def test_repo_format_guard_module_exists():
         "test_ci_workflow_includes_pyvisa_not_installed_job",
         ".github/workflows",
         "schemas/**/*.json",
-        "src/visa_mcp/templates",
+        "src/lab_visa_mcp/templates",
     ):
         assert kw in text, f"test_repo_format_guard.py に {kw!r} 無し"
 
@@ -242,7 +242,7 @@ def test_category_policy_doc_exists_with_canonical_list():
 def test_category_policy_doc_matches_implementation():
     """docs の canonical 一覧と実装の OUTPUT_CAPABLE_CATEGORIES が
     一致している (回帰防止)"""
-    from visa_mcp.registry import (
+    from lab_visa_mcp.registry import (
         OUTPUT_CAPABLE_CATEGORIES, CATEGORY_ALIASES,
     )
     text = (ROOT / "docs" / "category_policy.md").read_text(

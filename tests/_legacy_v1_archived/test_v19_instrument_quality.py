@@ -20,15 +20,15 @@ from pathlib import Path
 import pytest
 import yaml
 
-from visa_mcp import stability
-from visa_mcp.extension_authoring import (
+from lab_visa_mcp import stability
+from lab_visa_mcp.extension_authoring import (
     doctor_extension, init_extension_pack,
 )
-from visa_mcp.instrument_authoring import (
+from lab_visa_mcp.instrument_authoring import (
     add_instrument_to_pack, scaffold_instrument_definition,
     promote_check_instrument,
 )
-from visa_mcp.registry import (
+from lab_visa_mcp.registry import (
     CATEGORY_ALIASES, OUTPUT_CAPABLE_CATEGORIES,
     normalize_category, validate_instrument_file,
 )
@@ -42,8 +42,8 @@ ROOT = Path(__file__).parent.parent
 
 
 def test_version_v1_9_0():
-    import visa_mcp
-    assert visa_mcp.__version__.startswith("1.")
+    import lab_visa_mcp
+    assert lab_visa_mcp.__version__.startswith("1.")
 
 
 def test_no_new_mcp_tools_in_v1_9():
@@ -544,7 +544,7 @@ def test_doctor_emits_instrument_quality_summary(tmp_path):
 
 def _run_cli(*args: str) -> tuple[int, str, str]:
     r = subprocess.run(
-        [sys.executable, "-m", "visa_mcp.cli", *args],
+        [sys.executable, "-m", "lab_visa_mcp.cli", *args],
         capture_output=True, text=True, cwd=str(ROOT),
     )
     return r.returncode, r.stdout, r.stderr
@@ -567,7 +567,7 @@ def test_cli_dependency_report_runs():
         # actually use direct module form
     )
     r = subprocess.run(
-        [sys.executable, "-m", "visa_mcp.dev.dependency_report", "--json"],
+        [sys.executable, "-m", "lab_visa_mcp.dev.dependency_report", "--json"],
         capture_output=True, text=True, cwd=str(ROOT),
     )
     assert r.returncode == 0
@@ -598,11 +598,11 @@ def test_cli_validate_instrument_strict_runs(tmp_path):
 
 
 V19_FILES = [
-    "src/visa_mcp/registry.py",
-    "src/visa_mcp/cli.py",
-    "src/visa_mcp/dev/dependency_report.py",
-    "src/visa_mcp/instrument_authoring.py",
-    "src/visa_mcp/extension_authoring.py",
+    "src/lab_visa_mcp/registry.py",
+    "src/lab_visa_mcp/cli.py",
+    "src/lab_visa_mcp/dev/dependency_report.py",
+    "src/lab_visa_mcp/instrument_authoring.py",
+    "src/lab_visa_mcp/extension_authoring.py",
     "docs/separation/notes.md",
     "tests/test_separation_boundary.py",
     "tests/test_v19_instrument_quality.py",

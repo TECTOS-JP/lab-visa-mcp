@@ -15,7 +15,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from visa_mcp.session_store import (
+from lab_visa_mcp.session_store import (
     SessionStore, default_session_store_path, SCHEMA_VERSION,
 )
 
@@ -149,7 +149,7 @@ def fake_visa():
 
 
 def test_bind_manually_persists_to_store(tmp_path, fake_registry, fake_visa):
-    from visa_mcp.session_manager import SessionManager
+    from lab_visa_mcp.session_manager import SessionManager
     store = SessionStore(tmp_path / "sessions.json")
     sm = SessionManager(fake_visa, fake_registry, store=store)
     sm.bind_manually("GPIB0::2::INSTR", "Yokogawa", "7563")
@@ -163,7 +163,7 @@ def test_bind_manually_persists_to_store(tmp_path, fake_registry, fake_visa):
 def test_session_manager_restores_on_init(tmp_path, fake_registry, fake_visa):
     """1 つ目で bind → store 書き込み → 2 つ目で同じ store を渡すと
     in-memory session が復元される。"""
-    from visa_mcp.session_manager import SessionManager
+    from lab_visa_mcp.session_manager import SessionManager
     store_path = tmp_path / "sessions.json"
     store1 = SessionStore(store_path)
     sm1 = SessionManager(fake_visa, fake_registry, store=store1)
@@ -182,7 +182,7 @@ def test_session_manager_restores_on_init(tmp_path, fake_registry, fake_visa):
 def test_restore_skips_missing_definition(tmp_path, fake_visa):
     """registry に definition が無い record は skip するが store からは
     消さない (後で registry が更新されたら restore できる)。"""
-    from visa_mcp.session_manager import SessionManager
+    from lab_visa_mcp.session_manager import SessionManager
     store_path = tmp_path / "sessions.json"
     store = SessionStore(store_path)
     store.upsert("GPIB0::99::INSTR",
@@ -199,7 +199,7 @@ def test_restore_skips_missing_definition(tmp_path, fake_visa):
 
 
 def test_clear_session_removes_from_store(tmp_path, fake_registry, fake_visa):
-    from visa_mcp.session_manager import SessionManager
+    from lab_visa_mcp.session_manager import SessionManager
     store = SessionStore(tmp_path / "sessions.json")
     sm = SessionManager(fake_visa, fake_registry, store=store)
     sm.bind_manually("X", "Yokogawa", "7563")
@@ -210,7 +210,7 @@ def test_clear_session_removes_from_store(tmp_path, fake_registry, fake_visa):
 
 
 def test_clear_all_clears_store(tmp_path, fake_registry, fake_visa):
-    from visa_mcp.session_manager import SessionManager
+    from lab_visa_mcp.session_manager import SessionManager
     store = SessionStore(tmp_path / "sessions.json")
     sm = SessionManager(fake_visa, fake_registry, store=store)
     sm.bind_manually("A", "Yokogawa", "7563")
@@ -221,7 +221,7 @@ def test_clear_all_clears_store(tmp_path, fake_registry, fake_visa):
 
 def test_session_manager_without_store_works(fake_registry, fake_visa):
     """後方互換: store=None でも従来通り動く。"""
-    from visa_mcp.session_manager import SessionManager
+    from lab_visa_mcp.session_manager import SessionManager
     sm = SessionManager(fake_visa, fake_registry)  # 暗黙 store=None
     sm.bind_manually("X", "Yokogawa", "7563")
     assert sm.get_session("X") is not None
@@ -234,8 +234,8 @@ def test_session_manager_without_store_works(fake_registry, fake_visa):
 
 
 def test_v2_3_0_version():
-    import visa_mcp
-    parts = visa_mcp.__version__.split(".")
+    import lab_visa_mcp
+    parts = lab_visa_mcp.__version__.split(".")
     assert tuple(int(p) for p in parts[:3]) >= (2, 3, 0)
 
 

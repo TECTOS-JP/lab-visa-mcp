@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from visa_mcp.extension_install import (
+from lab_visa_mcp.extension_install import (
     install_definition_pack, load_overlay_registry,
     _should_exclude_path, _is_path_inside,
 )
@@ -29,9 +29,9 @@ ROOT = Path(__file__).parent.parent
 
 
 def test_version_v1_3_1():
-    import visa_mcp
+    import lab_visa_mcp
     # v1.3 系列 (1.3.x) を許容
-    assert visa_mcp.__version__.startswith("1.")
+    assert lab_visa_mcp.__version__.startswith("1.")
 
 
 # =========================================================
@@ -40,9 +40,9 @@ def test_version_v1_3_1():
 
 
 V13_FILES_FULL = [
-    "src/visa_mcp/extension_install.py",
-    "src/visa_mcp/cli.py",
-    "src/visa_mcp/extension.py",
+    "src/lab_visa_mcp/extension_install.py",
+    "src/lab_visa_mcp/cli.py",
+    "src/lab_visa_mcp/extension.py",
     "docs/extension_install.md",
     "docs/extension_registry_overlay.md",
     "docs/v1_stability_policy.md",
@@ -367,7 +367,7 @@ def test_overlay_warns_on_missing_optional_fields(temp_env, tmp_path):
 
 
 def test_cli_module_docstring_v13():
-    text = (ROOT / "src" / "visa_mcp" / "cli.py").read_text(encoding="utf-8")
+    text = (ROOT / "src" / "lab_visa_mcp" / "cli.py").read_text(encoding="utf-8")
     # 最初の 30 行を確認
     head = "\n".join(text.splitlines()[:30])
     assert "v0.9.2" not in head, "cli.py docstring が v0.9.2 のまま"

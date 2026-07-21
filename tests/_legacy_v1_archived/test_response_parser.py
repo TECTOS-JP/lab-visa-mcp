@@ -1,6 +1,6 @@
 """response_parser のテスト"""
-from visa_mcp.models.instrument_def import ResponseFormat
-from visa_mcp.response_parser import parse_response
+from lab_visa_mcp.models.instrument_def import ResponseFormat
+from lab_visa_mcp.response_parser import parse_response
 
 
 def test_parse_yokogawa_7563_data():

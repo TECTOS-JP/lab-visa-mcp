@@ -1,7 +1,7 @@
 """recommended_next_actions のテスト (v0.5.0)"""
-from visa_mcp.job.state_machine import JobStatus
-from visa_mcp.job.store import JobRecord
-from visa_mcp.tools.jobs import _recommended_actions_for
+from lab_visa_mcp.job.state_machine import JobStatus
+from lab_visa_mcp.job.store import JobRecord
+from lab_visa_mcp.tools.jobs import _recommended_actions_for
 
 
 def _rec(status: JobStatus, error_class: str = "") -> JobRecord:

@@ -48,7 +48,7 @@ def main() -> int:
     _ensure_path()
     SCHEMAS_DIR.mkdir(parents=True, exist_ok=True)
 
-    from visa_mcp.dsl.schema import ExperimentPlan
+    from lab_visa_mcp.dsl.schema import ExperimentPlan
     dsl_schema = ExperimentPlan.model_json_schema()
     _add_preview_metadata(
         dsl_schema, "dsl", "Experiment DSL ExperimentPlan (v1.0 stable)",
@@ -59,7 +59,7 @@ def main() -> int:
     )
     print("generated: schemas/dsl.schema.json")
 
-    from visa_mcp.models.instrument_def import InstrumentDefinition
+    from lab_visa_mcp.models.instrument_def import InstrumentDefinition
     inst_schema = InstrumentDefinition.model_json_schema()
     _add_preview_metadata(
         inst_schema, "instrument", "Instrument YAML Definition (v1.0 stable)",
@@ -71,7 +71,7 @@ def main() -> int:
     print("generated: schemas/instrument.schema.json")
 
     # v0.9.2: BenchmarkTask schema を追加 (Ecosystem 準備)
-    from visa_mcp.testing.benchmark_task import BenchmarkTask
+    from lab_visa_mcp.testing.benchmark_task import BenchmarkTask
     bench_schema = BenchmarkTask.model_json_schema()
     _add_preview_metadata(
         bench_schema, "benchmark_task",
@@ -85,7 +85,7 @@ def main() -> int:
 
     # v1.2: ExtensionManifest schema (experimental, definition pack manifest)
     # v1.2.1: title / description から「stable」表現を完全除去
-    from visa_mcp.extension import ExtensionManifest
+    from lab_visa_mcp.extension import ExtensionManifest
     ext_schema = ExtensionManifest.model_json_schema()
     ext_schema["$id"] = (
         "https://tectos-jp.github.io/visa-mcp/schemas/"
@@ -107,7 +107,7 @@ def main() -> int:
     )
     print("generated: schemas/extension_manifest.schema.json")
 
-    from visa_mcp.system_config import SystemConfig
+    from lab_visa_mcp.system_config import SystemConfig
     sysconf_schema = SystemConfig.model_json_schema()
     _add_preview_metadata(
         sysconf_schema, "system_config",

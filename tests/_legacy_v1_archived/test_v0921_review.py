@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from visa_mcp import registry as reg
+from lab_visa_mcp import registry as reg
 
 ROOT = Path(__file__).parent.parent
 
@@ -23,8 +23,8 @@ ROOT = Path(__file__).parent.parent
 
 
 REPO_TEXT_TARGETS = [
-    "src/visa_mcp/registry.py",
-    "src/visa_mcp/cli.py",
+    "src/lab_visa_mcp/registry.py",
+    "src/lab_visa_mcp/cli.py",
     "tests/test_v092_ecosystem.py",
     "registry/INDEX.yaml",
     "registry/README.md",

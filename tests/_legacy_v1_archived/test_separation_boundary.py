@@ -21,36 +21,36 @@ ROOT = Path(__file__).parent.parent
 
 # v2.0 で lab-executor-mcp 側へ移行する候補 module 群
 RUNTIME_CANDIDATE_MODULES = [
-    "visa_mcp.dsl",
-    "visa_mcp.extension",
-    "visa_mcp.extension_packaging",
-    "visa_mcp.extension_install",
-    "visa_mcp.extension_catalog",
-    "visa_mcp.extension_authoring",
-    "visa_mcp.extension_integrity",
-    "visa_mcp.instrument_authoring",
-    "visa_mcp.observation",
-    "visa_mcp.testing",
+    "lab_visa_mcp.dsl",
+    "lab_visa_mcp.extension",
+    "lab_visa_mcp.extension_packaging",
+    "lab_visa_mcp.extension_install",
+    "lab_visa_mcp.extension_catalog",
+    "lab_visa_mcp.extension_authoring",
+    "lab_visa_mcp.extension_integrity",
+    "lab_visa_mcp.instrument_authoring",
+    "lab_visa_mcp.observation",
+    "lab_visa_mcp.testing",
 ]
 
 # 上記 module 群が **直接 import してはいけない** modules
 # (visa-mcp 側 / PyVISA 透過 layer)
 FORBIDDEN_DIRECT_IMPORTS = {
-    "visa_mcp.visa_manager",
+    "lab_visa_mcp.visa_manager",
 }
 
 # AST 走査対象 path (RUNTIME_CANDIDATE_MODULES に対応)
 RUNTIME_CANDIDATE_PATHS = [
-    Path("src/visa_mcp/dsl"),
-    Path("src/visa_mcp/extension.py"),
-    Path("src/visa_mcp/extension_packaging.py"),
-    Path("src/visa_mcp/extension_install.py"),
-    Path("src/visa_mcp/extension_catalog.py"),
-    Path("src/visa_mcp/extension_authoring.py"),
-    Path("src/visa_mcp/extension_integrity.py"),
-    Path("src/visa_mcp/instrument_authoring.py"),
-    Path("src/visa_mcp/observation.py"),
-    Path("src/visa_mcp/testing"),
+    Path("src/lab_visa_mcp/dsl"),
+    Path("src/lab_visa_mcp/extension.py"),
+    Path("src/lab_visa_mcp/extension_packaging.py"),
+    Path("src/lab_visa_mcp/extension_install.py"),
+    Path("src/lab_visa_mcp/extension_catalog.py"),
+    Path("src/lab_visa_mcp/extension_authoring.py"),
+    Path("src/lab_visa_mcp/extension_integrity.py"),
+    Path("src/lab_visa_mcp/instrument_authoring.py"),
+    Path("src/lab_visa_mcp/observation.py"),
+    Path("src/lab_visa_mcp/testing"),
 ]
 
 
@@ -69,16 +69,16 @@ def test_runtime_modules_do_not_trigger_pyvisa_import_in_fresh_process():
     code = textwrap.dedent("""
         import importlib, sys
         mods = [
-            "visa_mcp.dsl",
-            "visa_mcp.extension",
-            "visa_mcp.extension_packaging",
-            "visa_mcp.extension_install",
-            "visa_mcp.extension_catalog",
-            "visa_mcp.extension_authoring",
-            "visa_mcp.extension_integrity",
-            "visa_mcp.instrument_authoring",
-            "visa_mcp.observation",
-            "visa_mcp.testing",
+            "lab_visa_mcp.dsl",
+            "lab_visa_mcp.extension",
+            "lab_visa_mcp.extension_packaging",
+            "lab_visa_mcp.extension_install",
+            "lab_visa_mcp.extension_catalog",
+            "lab_visa_mcp.extension_authoring",
+            "lab_visa_mcp.extension_integrity",
+            "lab_visa_mcp.instrument_authoring",
+            "lab_visa_mcp.observation",
+            "lab_visa_mcp.testing",
         ]
         for m in mods:
             importlib.import_module(m)
@@ -135,8 +135,8 @@ def _top_level_imports(source: str) -> list[str]:
 
 def test_runtime_modules_do_not_directly_import_visa_manager():
     """runtime 候補 module の **top-level** で
-    `from visa_mcp.visa_manager import ...` / `import
-    visa_mcp.visa_manager` が無いことを AST で確認する。
+    `from lab_visa_mcp.visa_manager import ...` / `import
+    lab_visa_mcp.visa_manager` が無いことを AST で確認する。
 
     関数 / メソッド内の lazy import は許容 (mock backend が VISA timeout
     error 互換を投げるためなど)。v1.11 で `InstrumentBackend` Protocol
@@ -184,10 +184,10 @@ def test_runtime_candidate_module_importable(module_name):
 
 
 def test_dependency_report_runs_in_clean_subprocess():
-    """`python -m visa_mcp.dev.dependency_report --json` が clean
+    """`python -m lab_visa_mcp.dev.dependency_report --json` が clean
     subprocess で 0 終了し、JSON を返すこと"""
     r = subprocess.run(
-        [sys.executable, "-m", "visa_mcp.dev.dependency_report", "--json"],
+        [sys.executable, "-m", "lab_visa_mcp.dev.dependency_report", "--json"],
         text=True, capture_output=True, cwd=str(ROOT),
     )
     assert r.returncode == 0, (

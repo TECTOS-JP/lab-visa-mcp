@@ -16,9 +16,9 @@ from pathlib import Path
 
 import pytest
 
-from visa_mcp.extension import validate_extension_file
-from visa_mcp.extension_install import install_definition_pack
-from visa_mcp.extension_integrity import (
+from lab_visa_mcp.extension import validate_extension_file
+from lab_visa_mcp.extension_install import install_definition_pack
+from lab_visa_mcp.extension_integrity import (
     check_installed_extension, inspect_installed_extension,
 )
 
@@ -31,8 +31,8 @@ ROOT = Path(__file__).parent.parent
 
 
 def test_version_v1_4_1():
-    import visa_mcp
-    assert visa_mcp.__version__.startswith("1.")
+    import lab_visa_mcp
+    assert lab_visa_mcp.__version__.startswith("1.")
 
 
 # =========================================================
@@ -41,11 +41,11 @@ def test_version_v1_4_1():
 
 
 V14_FILES_FULL = [
-    "src/visa_mcp/extension_integrity.py",
-    "src/visa_mcp/extension_install.py",
-    "src/visa_mcp/extension.py",
-    "src/visa_mcp/cli.py",
-    "src/visa_mcp/models/instrument_def.py",
+    "src/lab_visa_mcp/extension_integrity.py",
+    "src/lab_visa_mcp/extension_install.py",
+    "src/lab_visa_mcp/extension.py",
+    "src/lab_visa_mcp/cli.py",
+    "src/lab_visa_mcp/models/instrument_def.py",
     "tests/test_v14_extension_integrity.py",
     "tests/test_v141_review.py",
     "docs/extension_integrity.md",
@@ -372,7 +372,7 @@ def test_strict_registry_entries_clean_passes(tmp_path):
 
 def test_instrument_def_comment_matches_strict_error_behavior():
     """コメントが strict mode 時の挙動 (error) と整合している"""
-    text = (ROOT / "src" / "visa_mcp" / "models"
+    text = (ROOT / "src" / "lab_visa_mcp" / "models"
             / "instrument_def.py").read_text(encoding="utf-8")
     # strict_verified_requires_evidence (実装側 error_class) を
     # コメントから参照していること = 「error」として扱う旨が明示されている

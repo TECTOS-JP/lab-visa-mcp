@@ -17,8 +17,8 @@ from pathlib import Path
 import pytest
 import yaml
 
-from visa_mcp.extension import validate_extension_file
-from visa_mcp.extension_authoring import (
+from lab_visa_mcp.extension import validate_extension_file
+from lab_visa_mcp.extension_authoring import (
     init_extension_pack, TEMPLATES,
 )
 
@@ -31,8 +31,8 @@ ROOT = Path(__file__).parent.parent
 
 
 def test_version_v1_7_1():
-    import visa_mcp
-    assert visa_mcp.__version__.startswith("1.")
+    import lab_visa_mcp
+    assert lab_visa_mcp.__version__.startswith("1.")
 
 
 # =========================================================
@@ -41,12 +41,12 @@ def test_version_v1_7_1():
 
 
 V17_FILES_FULL = [
-    "src/visa_mcp/extension_authoring.py",
-    "src/visa_mcp/extension_packaging.py",
-    "src/visa_mcp/extension_install.py",
-    "src/visa_mcp/extension_catalog.py",
-    "src/visa_mcp/extension.py",
-    "src/visa_mcp/cli.py",
+    "src/lab_visa_mcp/extension_authoring.py",
+    "src/lab_visa_mcp/extension_packaging.py",
+    "src/lab_visa_mcp/extension_install.py",
+    "src/lab_visa_mcp/extension_catalog.py",
+    "src/lab_visa_mcp/extension.py",
+    "src/lab_visa_mcp/cli.py",
     "docs/extension_authoring.md",
     "docs/extension_packaging.md",
     "docs/extension_install.md",
@@ -206,7 +206,7 @@ def test_authoring_doc_explains_ready_distinction():
 
 def _run_cli(*args: str) -> tuple[int, str, str]:
     r = subprocess.run(
-        [sys.executable, "-m", "visa_mcp.cli", *args],
+        [sys.executable, "-m", "lab_visa_mcp.cli", *args],
         capture_output=True, text=True, cwd=str(ROOT),
     )
     return r.returncode, r.stdout, r.stderr

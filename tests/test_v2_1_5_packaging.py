@@ -32,7 +32,7 @@ import yaml
 
 
 REPO = Path(__file__).resolve().parent.parent
-BUILTIN = REPO / "src" / "visa_mcp" / "builtin_instruments"
+BUILTIN = REPO / "src" / "lab_visa_mcp" / "builtin_instruments"
 
 
 # ---------------------------------------------------------------
@@ -74,17 +74,17 @@ def test_resolver_prefers_repo_instruments_over_examples(
         "metadata: {}", encoding="utf-8")
 
     # `here.parent.parent.parent` が fake_repo に対応するように、
-    # __file__ がそこの src/visa_mcp/server.py であるかのように振る舞わせる
+    # __file__ がそこの src/lab_visa_mcp/server.py であるかのように振る舞わせる
     # v2.1.6+: dev リポジトリ判定に pyproject.toml が必要
     (fake_repo / "pyproject.toml").write_text("[project]", encoding="utf-8")
-    fake_server = fake_repo / "src" / "visa_mcp"
+    fake_server = fake_repo / "src" / "lab_visa_mcp"
     fake_server.mkdir(parents=True)
     fake_server_py = fake_server / "server.py"
     fake_server_py.write_text("# fake", encoding="utf-8")
 
     # v2.3.6: server module を import せず純粋関数を直接呼ぶ
     # (server import は JobManager/JobStore 初期化の副作用がある)
-    from visa_mcp.instruments_dir import resolve_instruments_dir
+    from lab_visa_mcp.instruments_dir import resolve_instruments_dir
     monkeypatch.delenv("VISA_MCP_INSTRUMENTS_DIR", raising=False)
     resolved = resolve_instruments_dir(str(fake_server_py))
     assert resolved == instr, (
@@ -112,12 +112,12 @@ def test_resolver_skips_instruments_when_only_underscore_yaml(
 
     # v2.1.6+: dev リポジトリ判定に pyproject.toml が必要
     (fake_repo / "pyproject.toml").write_text("[project]", encoding="utf-8")
-    fake_server = fake_repo / "src" / "visa_mcp"
+    fake_server = fake_repo / "src" / "lab_visa_mcp"
     fake_server.mkdir(parents=True)
     fake_server_py = fake_server / "server.py"
     fake_server_py.write_text("# fake", encoding="utf-8")
 
-    from visa_mcp.instruments_dir import resolve_instruments_dir
+    from lab_visa_mcp.instruments_dir import resolve_instruments_dir
     monkeypatch.delenv("VISA_MCP_INSTRUMENTS_DIR", raising=False)
     resolved = resolve_instruments_dir(str(fake_server_py))
     assert resolved == examples_instr
@@ -134,19 +134,19 @@ def test_resolver_falls_back_to_builtin_and_loads_real_definitions(
     そこから本物の InstrumentRegistry がロードする 2 件以上の機器
     定義が得られること。"""
     fake_repo = tmp_path / "fake_repo"
-    fake_server = fake_repo / "src" / "visa_mcp"
+    fake_server = fake_repo / "src" / "lab_visa_mcp"
     fake_server.mkdir(parents=True)
     fake_server_py = fake_server / "server.py"
     fake_server_py.write_text("# fake", encoding="utf-8")
     # fake_repo 下に instruments も examples も置かない
 
-    from visa_mcp.instruments_dir import resolve_instruments_dir
+    from lab_visa_mcp.instruments_dir import resolve_instruments_dir
     monkeypatch.delenv("VISA_MCP_INSTRUMENTS_DIR", raising=False)
     resolved = resolve_instruments_dir(str(fake_server_py))
     # fake_server の builtin_instruments は存在しないので、実 builtin
     # が見えないケースになる。代わりに直接 builtin_instruments を
     # InstrumentRegistry に与え、definitions が読めることを確認する。
-    from visa_mcp.instrument_registry import InstrumentRegistry
+    from lab_visa_mcp.instrument_registry import InstrumentRegistry
     reg = InstrumentRegistry(str(BUILTIN))
     reg.reload()
     defs = reg.list_definitions()
@@ -186,13 +186,13 @@ def _try_build_wheel(out_dir: Path) -> Path | None:
     )
     if res.returncode != 0:
         pytest.skip(f"wheel build 失敗 (CI 環境差?): {res.stderr[:200]}")
-    wheels = list(out_dir.glob("visa_mcp-*.whl"))
+    wheels = list(out_dir.glob("lab_visa_mcp-*.whl"))
     return wheels[0] if wheels else None
 
 
 def test_built_wheel_contains_builtin_instruments(tmp_path):
     """v2.1.5: 実際に `python -m build --wheel` で wheel を作り、
-    その中に `visa_mcp/builtin_instruments/*.yaml` が
+    その中に `lab_visa_mcp/builtin_instruments/*.yaml` が
     含まれていること (PMX, 7563, _system)。"""
     wheel = _try_build_wheel(tmp_path)
     if wheel is None:
@@ -201,7 +201,7 @@ def test_built_wheel_contains_builtin_instruments(tmp_path):
         names = zf.namelist()
     yamls = [
         n for n in names
-        if n.startswith("visa_mcp/builtin_instruments/")
+        if n.startswith("lab_visa_mcp/builtin_instruments/")
         and n.endswith(".yaml")
     ]
     assert any("pmx" in n.lower() or "kikusui" in n.lower()
@@ -213,8 +213,8 @@ def test_built_wheel_contains_builtin_instruments(tmp_path):
 
 
 def test_v2_1_5_version():
-    import visa_mcp
-    parts = visa_mcp.__version__.split(".")
+    import lab_visa_mcp
+    parts = lab_visa_mcp.__version__.split(".")
     assert tuple(int(p) for p in parts[:3]) >= (2, 1, 5)
 
 
@@ -248,5 +248,5 @@ def test_wheel_build_succeeds_no_duplicate(tmp_path):
     combined = (res.stdout + res.stderr).lower()
     assert "second file is being added" not in combined, (
         "v2.3.5: force-include 重複が再発している")
-    wheels = list(tmp_path.glob("visa_mcp-*.whl"))
+    wheels = list(tmp_path.glob("lab_visa_mcp-*.whl"))
     assert wheels, "wheel が生成されていない"

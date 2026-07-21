@@ -13,12 +13,12 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 import yaml
 
-from visa_mcp.dsl.compiler import validate_and_compile, CompiledPlan
-from visa_mcp.job import JobManager, JobStore
-from visa_mcp.job.state_machine import JobStatus, is_terminal
-from visa_mcp.models.instrument_def import InstrumentDefinition
-from visa_mcp.session_manager import InstrumentSession
-from visa_mcp.system_config import (
+from lab_visa_mcp.dsl.compiler import validate_and_compile, CompiledPlan
+from lab_visa_mcp.job import JobManager, JobStore
+from lab_visa_mcp.job.state_machine import JobStatus, is_terminal
+from lab_visa_mcp.models.instrument_def import InstrumentDefinition
+from lab_visa_mcp.session_manager import InstrumentSession
+from lab_visa_mcp.system_config import (
     SystemConfig, InstrumentBinding,
 )
 
@@ -461,7 +461,7 @@ def test_parallel_shared_resource_warns(tmp_path, monkeypatch):
 def test_dsl_examples_parse_as_schema(example_name):
     """examples の plan.json が Pydantic schema を通る (機器 binding は実環境依存なので
     schema 適合のみ確認)"""
-    from visa_mcp.dsl.schema import ExperimentPlan
+    from lab_visa_mcp.dsl.schema import ExperimentPlan
     base = Path(__file__).parent.parent / "docs" / "dsl" / "examples"
     p = base / example_name / "plan.json"
     if not p.exists():

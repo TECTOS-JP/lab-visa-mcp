@@ -6,7 +6,7 @@
 - P1-4: contents.* path traversal / 絶対パス拒否
 - P1-5: validate extension が実行可能性まで保証しないと docs に明記
 - P1-6: empty_contents strict mode 候補 docs
-- P2-7/8: registry_entries / visa_mcp_compatibility 補強
+- P2-7/8: registry_entries / lab_visa_mcp_compatibility 補強
 """
 from __future__ import annotations
 import json
@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from visa_mcp.extension import validate_extension_file
+from lab_visa_mcp.extension import validate_extension_file
 
 ROOT = Path(__file__).parent.parent
 
@@ -26,8 +26,8 @@ ROOT = Path(__file__).parent.parent
 
 def test_version_v1_2_1():
     """v1.2+ の v1.x 系列を許容"""
-    import visa_mcp
-    assert visa_mcp.__version__.startswith("1.")
+    import lab_visa_mcp
+    assert lab_visa_mcp.__version__.startswith("1.")
 
 
 # =========================================================
@@ -36,7 +36,7 @@ def test_version_v1_2_1():
 
 
 V12_FILES_FULL = [
-    "src/visa_mcp/extension.py",
+    "src/lab_visa_mcp/extension.py",
     "schemas/extension_manifest.schema.json",
     "docs/extension_policy.md",
     "docs/definition_packs.md",
@@ -102,7 +102,7 @@ def test_definition_packs_doc_explains_extension_id_format():
     assert "recommended" in text.lower()
 
 
-def test_definition_packs_doc_explains_visa_mcp_compatibility():
+def test_definition_packs_doc_explains_lab_visa_mcp_compatibility():
     text = (ROOT / "docs" / "definition_packs.md").read_text(encoding="utf-8")
     assert "記録用メタデータ" in text or "metadata only" in text.lower()
 

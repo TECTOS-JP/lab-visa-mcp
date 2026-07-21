@@ -1,6 +1,6 @@
 """v0.6.1: Barrier / Stagger テスト
 
-実装方針 (visa_mcp_v0.6.1の実装方針.md) の必須テスト 3 件:
+実装方針 (lab_visa_mcp_v0.6.1の実装方針.md) の必須テスト 3 件:
 - test_barrier_does_not_hold_target_resource_lock_deadlock
 - test_stagger_starts_targets_in_input_order
 - test_partial_failure_with_barrier
@@ -13,14 +13,14 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 import yaml
 
-from visa_mcp.experiment_ir import (
+from lab_visa_mcp.experiment_ir import (
     BarrierStep, CommandStep, Plan, WaitStep,
 )
-from visa_mcp.group import FailurePolicy, TargetExecution
-from visa_mcp.group.barrier import BarrierCoordinator
-from visa_mcp.group.executor import GroupExecutor
-from visa_mcp.models.instrument_def import InstrumentDefinition
-from visa_mcp.session_manager import InstrumentSession
+from lab_visa_mcp.group import FailurePolicy, TargetExecution
+from lab_visa_mcp.group.barrier import BarrierCoordinator
+from lab_visa_mcp.group.executor import GroupExecutor
+from lab_visa_mcp.models.instrument_def import InstrumentDefinition
+from lab_visa_mcp.session_manager import InstrumentSession
 
 
 YAML_PSU = """
@@ -317,7 +317,7 @@ async def test_partial_failure_with_barrier_continue(monkeypatch):
     barrier 成立。Job 全体は partial_failure。
     """
     monkeypatch.setenv("VISA_MCP_SAFETY_MODE", "permissive")
-    from visa_mcp.visa_manager import VisaError
+    from lab_visa_mcp.visa_manager import VisaError
 
     visa = MagicMock()
 
@@ -522,7 +522,7 @@ async def test_execute_recipe_rejects_barrier_step():
               - barrier: { name: b1, timeout_s: 10 }
               - { command: measure_voltage }
         """)
-    from visa_mcp.recipe_executor import execute_recipe
+    from lab_visa_mcp.recipe_executor import execute_recipe
     d = InstrumentDefinition(**yaml.safe_load(YAML_WITH_BARRIER))
     session = InstrumentSession(
         resource_name="r0", idn_response="<x>",

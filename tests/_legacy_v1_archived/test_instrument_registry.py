@@ -1,6 +1,6 @@
 """InstrumentRegistry の統合テスト: YAML ファイルをロードし、定義検索が動作する。"""
 import textwrap
-from visa_mcp.instrument_registry import InstrumentRegistry
+from lab_visa_mcp.instrument_registry import InstrumentRegistry
 
 
 def write_yaml(tmp_path, name, content):

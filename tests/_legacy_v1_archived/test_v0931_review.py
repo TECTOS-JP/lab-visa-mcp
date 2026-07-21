@@ -20,10 +20,10 @@ ROOT = Path(__file__).parent.parent
 
 
 REPO_TEXT_TARGETS = [
-    "src/visa_mcp/audit.py",
-    "src/visa_mcp/tools/audit.py",
-    "src/visa_mcp/job/manager.py",
-    "src/visa_mcp/server.py",
+    "src/lab_visa_mcp/audit.py",
+    "src/lab_visa_mcp/tools/audit.py",
+    "src/lab_visa_mcp/job/manager.py",
+    "src/lab_visa_mcp/server.py",
     "tests/test_v093_audit_locks.py",
     "docs/operational_integrity.md",
     "docs/error_taxonomy.md",
@@ -63,10 +63,10 @@ commands:
 
 
 def _setup(tmp_path):
-    from visa_mcp.job import JobManager, JobStore
-    from visa_mcp.models.instrument_def import InstrumentDefinition
-    from visa_mcp.session_manager import InstrumentSession
-    from visa_mcp.system_config import SystemConfig, InstrumentBinding
+    from lab_visa_mcp.job import JobManager, JobStore
+    from lab_visa_mcp.models.instrument_def import InstrumentDefinition
+    from lab_visa_mcp.session_manager import InstrumentSession
+    from lab_visa_mcp.system_config import SystemConfig, InstrumentBinding
 
     d = InstrumentDefinition(**yaml.safe_load(YAML_PSU))
     sessions = {
@@ -112,7 +112,7 @@ async def test_query_audit_returns_audit_unavailable_when_disabled(
         mgr._audit = None
         mgr._audit_init_error = True
         from fastmcp import FastMCP
-        from visa_mcp.tools.audit import register_tools
+        from lab_visa_mcp.tools.audit import register_tools
         mcp = FastMCP("t")
         register_tools(mcp, mgr)
         tool = await mcp.get_tool("query_audit")
@@ -138,7 +138,7 @@ async def test_list_locks_returns_audit_unavailable_when_disabled(
         mgr._audit = None
         mgr._audit_init_error = True
         from fastmcp import FastMCP
-        from visa_mcp.tools.audit import register_tools
+        from lab_visa_mcp.tools.audit import register_tools
         mcp = FastMCP("t")
         register_tools(mcp, mgr)
         tool = await mcp.get_tool("list_locks")

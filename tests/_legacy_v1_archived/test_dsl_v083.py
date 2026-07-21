@@ -23,14 +23,14 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 import yaml
 
-from visa_mcp.dsl.compiler import validate_and_compile
-from visa_mcp.dsl.template import (
+from lab_visa_mcp.dsl.compiler import validate_and_compile
+from lab_visa_mcp.dsl.template import (
     apply_template_override, TemplateOverrideError, ALLOWED_OVERRIDE_KEYS,
 )
-from visa_mcp.job import JobManager, JobStore
-from visa_mcp.models.instrument_def import InstrumentDefinition
-from visa_mcp.session_manager import InstrumentSession
-from visa_mcp.system_config import (
+from lab_visa_mcp.job import JobManager, JobStore
+from lab_visa_mcp.models.instrument_def import InstrumentDefinition
+from lab_visa_mcp.session_manager import InstrumentSession
+from lab_visa_mcp.system_config import (
     SystemConfig, InstrumentBinding, ExperimentUnit,
 )
 
@@ -418,7 +418,7 @@ async def test_template_source_recorded_in_job_metadata(tmp_path, monkeypatch):
 
         # MCP tool 経由 (FastMCP)
         from fastmcp import FastMCP
-        from visa_mcp.tools.dsl import register_tools
+        from lab_visa_mcp.tools.dsl import register_tools
         mcp = FastMCP("test")
         register_tools(mcp, sm, mgr)
         tool = await mcp.get_tool("start_experiment_job_from_template")
@@ -459,7 +459,7 @@ async def test_template_override_dry_run_mode(tmp_path, monkeypatch):
             name="t1", dsl_version="0.8", plan=tpl,
         )
         from fastmcp import FastMCP
-        from visa_mcp.tools.dsl import register_tools
+        from lab_visa_mcp.tools.dsl import register_tools
         mcp = FastMCP("test")
         register_tools(mcp, sm, mgr)
         tool = await mcp.get_tool("start_experiment_job_from_template")
@@ -488,7 +488,7 @@ async def test_template_override_steps_rejected_via_tool(tmp_path, monkeypatch):
             name="t2", dsl_version="0.8", plan=_template_plan(),
         )
         from fastmcp import FastMCP
-        from visa_mcp.tools.dsl import register_tools
+        from lab_visa_mcp.tools.dsl import register_tools
         mcp = FastMCP("test")
         register_tools(mcp, sm, mgr)
         tool = await mcp.get_tool("start_experiment_job_from_template")
@@ -513,7 +513,7 @@ async def test_template_not_found(tmp_path, monkeypatch):
     _, sm, mgr, sys_cfg, store = _setup_with_units(tmp_path)
     try:
         from fastmcp import FastMCP
-        from visa_mcp.tools.dsl import register_tools
+        from lab_visa_mcp.tools.dsl import register_tools
         mcp = FastMCP("test")
         register_tools(mcp, sm, mgr)
         tool = await mcp.get_tool("start_experiment_job_from_template")

@@ -31,9 +31,9 @@ YOK_RESOURCE = "GPIB0::2::INSTR"
 
 @pytest.fixture(scope="module")
 async def session_mgr():
-    from visa_mcp.visa_manager import VisaManager
-    from visa_mcp.instrument_registry import InstrumentRegistry
-    from visa_mcp.session_manager import SessionManager
+    from lab_visa_mcp.visa_manager import VisaManager
+    from lab_visa_mcp.instrument_registry import InstrumentRegistry
+    from lab_visa_mcp.session_manager import SessionManager
 
     visa = VisaManager()
     registry = InstrumentRegistry(INSTRUMENTS_DIR)
@@ -123,7 +123,7 @@ def test_pmx_output_on_blocked_without_protection(session_mgr):
     OVP/OCP を設定せずに output ON を試みると precondition 違反が返る。
     実際にコマンドは送信しない（sf.validate のみ）。
     """
-    from visa_mcp import safety as sf
+    from lab_visa_mcp import safety as sf
 
     session = session_mgr.get_session(PMX_RESOURCE)
     assert session is not None, "PMX セッションが未確立"
@@ -148,7 +148,7 @@ def test_pmx_output_on_allowed_after_protection(session_mgr):
     """
     OVP/OCP 設定済み履歴があれば output ON の precondition が通る。
     """
-    from visa_mcp import safety as sf
+    from lab_visa_mcp import safety as sf
 
     session = session_mgr.get_session(PMX_RESOURCE)
     assert session is not None
@@ -179,7 +179,7 @@ def test_pmx_output_on_allowed_after_protection(session_mgr):
 ])
 def test_longform_detection(cmd, expected_label):
     """v0.4.1: SCPI ロングフォームが危険キーワードとして検出される"""
-    from visa_mcp.tools.commands import _detect_dangerous_keywords
+    from lab_visa_mcp.tools.commands import _detect_dangerous_keywords
     hits = _detect_dangerous_keywords(cmd)
     assert expected_label in hits, f"'{cmd}' から '{expected_label}' 未検出。実際: {hits}"
 
@@ -191,7 +191,7 @@ def test_longform_detection(cmd, expected_label):
 ])
 def test_compound_query_detection(cmd):
     """v0.4.1: ; を含む複合コマンドは ? があっても危険と判定される"""
-    from visa_mcp.tools.commands import _detect_dangerous_keywords
+    from lab_visa_mcp.tools.commands import _detect_dangerous_keywords
     assert _detect_dangerous_keywords(cmd) != [], f"'{cmd}' は危険と判定されるべき"
 
 
@@ -200,7 +200,7 @@ def test_compound_query_detection(cmd):
 ])
 def test_pure_query_safe(cmd):
     """v0.4.1: pure query (? のみ) は安全扱い"""
-    from visa_mcp.tools.commands import _detect_dangerous_keywords
+    from lab_visa_mcp.tools.commands import _detect_dangerous_keywords
     assert _detect_dangerous_keywords(cmd) == [], f"'{cmd}' は安全のはず"
 
 
@@ -228,7 +228,7 @@ async def test_yokogawa_read_measurement(session_mgr):
     assert response.strip() != "", "測定データが空"
 
     # 応答フォーマット解析
-    from visa_mcp.response_parser import parse_with_definition
+    from lab_visa_mcp.response_parser import parse_with_definition
     session = session_mgr.get_session(YOK_RESOURCE)
     assert session is not None
 

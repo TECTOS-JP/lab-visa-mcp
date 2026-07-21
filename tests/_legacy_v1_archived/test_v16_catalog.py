@@ -17,14 +17,14 @@ from pathlib import Path
 import pytest
 import yaml
 
-from visa_mcp.extension import (
+from lab_visa_mcp.extension import (
     ExtensionCatalog, ExtensionManifest, validate_extension_file,
 )
-from visa_mcp.extension_install import (
+from lab_visa_mcp.extension_install import (
     install_definition_pack, install_definition_pack_from_zip,
 )
-from visa_mcp.extension_packaging import package_definition_pack
-from visa_mcp.extension_catalog import (
+from lab_visa_mcp.extension_packaging import package_definition_pack
+from lab_visa_mcp.extension_catalog import (
     support_level_summary, quality_signals, inspect_package,
     list_catalog_installed, list_catalog_packages,
 )
@@ -395,7 +395,7 @@ def test_validate_extension_with_catalog_passes_strict(tmp_path):
 
 def _run_cli(*args: str) -> tuple[int, str, str]:
     r = subprocess.run(
-        [sys.executable, "-m", "visa_mcp.cli", *args],
+        [sys.executable, "-m", "lab_visa_mcp.cli", *args],
         capture_output=True, text=True, cwd=str(ROOT),
     )
     return r.returncode, r.stdout, r.stderr
@@ -450,9 +450,9 @@ def test_cli_extension_inspect_package_runs(temp_pack):
 
 
 V16_FILES = [
-    "src/visa_mcp/extension_catalog.py",
-    "src/visa_mcp/extension.py",
-    "src/visa_mcp/cli.py",
+    "src/lab_visa_mcp/extension_catalog.py",
+    "src/lab_visa_mcp/extension.py",
+    "src/lab_visa_mcp/cli.py",
     "docs/extension_catalog.md",
     "tests/test_v16_catalog.py",
     "CHANGELOG.md",

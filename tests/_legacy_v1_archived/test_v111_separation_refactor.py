@@ -6,7 +6,7 @@
 - runtime 候補 module が visa_manager / session_manager を top-level
   import していない (KNOWN_V111_TO_RESOLVE = 0)
 - split rehearsal: lab_executor_candidate ツリー生成
-- candidate が `import visa_mcp` を含まない (rewrite 後)
+- candidate が `import lab_visa_mcp` を含まない (rewrite 後)
 - docs/raw_visa.md が存在 (visa-mcp 側 v2.0 用)
 - Stable 43 / Experimental 7 / 計 50 不変
 """
@@ -20,12 +20,12 @@ ROOT = Path(__file__).parent.parent
 
 
 def test_version_is_1_11_0():
-    from visa_mcp import __version__
+    from lab_visa_mcp import __version__
     assert __version__.startswith("1.11.")
 
 
 def test_instrument_backend_protocol_runtime_checkable():
-    from visa_mcp.backends import InstrumentBackend
+    from lab_visa_mcp.backends import InstrumentBackend
     from typing import get_origin
     # runtime_checkable Protocol
     assert hasattr(InstrumentBackend, "_is_runtime_protocol")
@@ -38,13 +38,13 @@ def test_pyvisa_backend_module_imports_without_instantiating():
     (型注釈は TYPE_CHECKING 内、内部の VisaManager 生成は __init__
     で初めて起こる)。"""
     import importlib
-    mod = importlib.import_module("visa_mcp.backends.pyvisa_backend")
+    mod = importlib.import_module("lab_visa_mcp.backends.pyvisa_backend")
     assert hasattr(mod, "PyVisaBackend")
 
 
 def test_pyvisa_backend_class_satisfies_protocol_shape():
     """class level の structural shape check (instance を作らない)"""
-    from visa_mcp.backends import PyVisaBackend
+    from lab_visa_mcp.backends import PyVisaBackend
     for name in ("backend_id", "list_resources", "query", "write",
                   "close"):
         assert hasattr(PyVisaBackend, name), (
@@ -52,7 +52,7 @@ def test_pyvisa_backend_class_satisfies_protocol_shape():
 
 
 def test_mock_backend_satisfies_protocol():
-    from visa_mcp.backends import InstrumentBackend, MockBackend
+    from lab_visa_mcp.backends import InstrumentBackend, MockBackend
     for name in ("backend_id", "list_resources", "query", "write",
                   "close"):
         assert hasattr(MockBackend, name), (
@@ -62,14 +62,14 @@ def test_mock_backend_satisfies_protocol():
 def test_pyvisa_backend_constructible_without_explicit_visa(monkeypatch):
     """PyVisaBackend() が VisaManager を内部生成できる
     (PyVISA が install 済みの環境で動く)"""
-    from visa_mcp.backends import PyVisaBackend
+    from lab_visa_mcp.backends import PyVisaBackend
     b = PyVisaBackend()
     assert b.backend_id == "pyvisa"
     assert b.visa_manager is not None
 
 
 def test_mock_backend_constructible_without_explicit_visa():
-    from visa_mcp.backends import MockBackend
+    from lab_visa_mcp.backends import MockBackend
     b = MockBackend()
     assert b.backend_id == "mock"
     assert b.mock_visa is not None
@@ -77,7 +77,7 @@ def test_mock_backend_constructible_without_explicit_visa():
 
 def test_no_known_v1_11_violations():
     """v1.11 gate: KNOWN_V111_TO_RESOLVE = 0 件"""
-    from visa_mcp.dev.ownership_check import (
+    from lab_visa_mcp.dev.ownership_check import (
         KNOWN_V111_TO_RESOLVE, collect_report,
     )
     assert len(KNOWN_V111_TO_RESOLVE) == 0, (
@@ -93,12 +93,12 @@ def test_runtime_modules_no_toplevel_visa_manager_import():
     """lab-executor owner module の top-level に
     visa_manager / session_manager / pyvisa が無いこと"""
     forbidden = {
-        "visa_mcp.visa_manager", "visa_mcp.session_manager",
+        "lab_visa_mcp.visa_manager", "lab_visa_mcp.session_manager",
         "pyvisa",
     }
     # 例外: lazy import が許容される module
     lazy_exceptions = {
-        "visa_mcp.testing.mock_instruments",
+        "lab_visa_mcp.testing.mock_instruments",
         # backends/pyvisa_backend.py は visa-mcp owner なので除外
     }
 
@@ -141,7 +141,7 @@ def test_runtime_modules_no_toplevel_visa_manager_import():
 
 def test_split_rehearsal_generates_candidate(tmp_path):
     """split_rehearsal が candidate tree を生成"""
-    from visa_mcp.dev.split_rehearsal import generate_candidate
+    from lab_visa_mcp.dev.split_rehearsal import generate_candidate
     out = tmp_path / "lab_executor_candidate"
     summary = generate_candidate(out)
     assert out.exists()
@@ -157,10 +157,10 @@ def test_split_rehearsal_generates_candidate(tmp_path):
                 f"missing: {rel}")
 
 
-def test_split_rehearsal_candidate_has_no_visa_mcp_imports(tmp_path):
-    """生成 candidate ツリー内に `import visa_mcp.<lab module>`
+def test_split_rehearsal_candidate_has_no_lab_visa_mcp_imports(tmp_path):
+    """生成 candidate ツリー内に `import lab_visa_mcp.<lab module>`
     が残っていない (visa-mcp owner / shared module の import は許容)"""
-    from visa_mcp.dev.split_rehearsal import generate_candidate
+    from lab_visa_mcp.dev.split_rehearsal import generate_candidate
     out = tmp_path / "lab_executor_candidate"
     generate_candidate(out)
     import yaml
@@ -176,7 +176,7 @@ def test_split_rehearsal_candidate_has_no_visa_mcp_imports(tmp_path):
     for py in out.rglob("*.py"):
         text = py.read_text(encoding="utf-8")
         for lab in lab_modules:
-            # `from visa_mcp.<lab>` または `import visa_mcp.<lab>`
+            # `from lab_visa_mcp.<lab>` または `import lab_visa_mcp.<lab>`
             # が残っているか
             patterns = [
                 f"from {lab}",
@@ -192,7 +192,7 @@ def test_split_rehearsal_candidate_has_no_visa_mcp_imports(tmp_path):
 def test_split_rehearsal_cli_runs(tmp_path):
     out = tmp_path / "cli_candidate"
     res = subprocess.run(
-        [sys.executable, "-m", "visa_mcp.dev.split_rehearsal",
+        [sys.executable, "-m", "lab_visa_mcp.dev.split_rehearsal",
          "--out", str(out), "--json"],
         cwd=str(ROOT),
         capture_output=True, text=True,
@@ -220,7 +220,7 @@ def test_raw_visa_doc_exists():
 def test_stable_tool_count_unchanged():
     """Stable 43 / Experimental 7 / 計 50 が v1.11 でも不変
     (stability.STABLE_TOOLS は category -> list なので flatten で count)"""
-    from visa_mcp import stability
+    from lab_visa_mcp import stability
     stable_flat = [t for ts in stability.STABLE_TOOLS.values() for t in ts]
     exp_flat = [
         t for ts in stability.EXPERIMENTAL_TOOLS.values() for t in ts
@@ -232,7 +232,7 @@ def test_stable_tool_count_unchanged():
 
 
 def test_backends_init_exposes_adapters():
-    from visa_mcp import backends
+    from lab_visa_mcp import backends
     assert hasattr(backends, "InstrumentBackend")
     assert hasattr(backends, "PyVisaBackend")
     assert hasattr(backends, "MockBackend")
@@ -241,7 +241,7 @@ def test_backends_init_exposes_adapters():
 def test_split_rehearsal_verify_candidate(tmp_path):
     """v1.11.1 (P1-4): verify_candidate が AST parse + leftover 検査
     を実行し、生成直後の candidate に対し OK を返す"""
-    from visa_mcp.dev.split_rehearsal import (
+    from lab_visa_mcp.dev.split_rehearsal import (
         generate_candidate, verify_candidate,
     )
     out = tmp_path / "cand_verify"
@@ -249,14 +249,14 @@ def test_split_rehearsal_verify_candidate(tmp_path):
     rep = verify_candidate(out)
     assert rep["ok"], (
         f"verify failed: parse_errors={rep['parse_errors'][:3]}, "
-        f"leftover={rep['leftover_visa_mcp'][:3]}")
+        f"leftover={rep['leftover_lab_visa_mcp'][:3]}")
     assert rep["parse_ok_count"] >= 30
 
 
 def test_split_rehearsal_cli_verify_flag(tmp_path):
     out = tmp_path / "cand_cli_verify"
     res = subprocess.run(
-        [sys.executable, "-m", "visa_mcp.dev.split_rehearsal",
+        [sys.executable, "-m", "lab_visa_mcp.dev.split_rehearsal",
          "--out", str(out), "--verify", "--json"],
         cwd=str(ROOT),
         capture_output=True, text=True,
@@ -277,10 +277,10 @@ def test_v111_new_files_covered_by_format_guard():
     files = {str(p.relative_to(ROOT)).replace("\\", "/")
              for p in _collect_files()}
     must_cover = [
-        "src/visa_mcp/backends/base.py",
-        "src/visa_mcp/backends/pyvisa_backend.py",
-        "src/visa_mcp/backends/mock_backend.py",
-        "src/visa_mcp/dev/split_rehearsal.py",
+        "src/lab_visa_mcp/backends/base.py",
+        "src/lab_visa_mcp/backends/pyvisa_backend.py",
+        "src/lab_visa_mcp/backends/mock_backend.py",
+        "src/lab_visa_mcp/dev/split_rehearsal.py",
         "tests/test_v111_separation_refactor.py",
         "docs/raw_visa.md",
         "docs/separation/module_ownership.yaml",
@@ -294,10 +294,10 @@ def test_v111_new_files_are_multiline():
     """v1.11.1 (P0): v1.11 で追加した主要 file が multi-line
     (>= 30 行) + LF only で保存されている"""
     targets = [
-        "src/visa_mcp/backends/base.py",
-        "src/visa_mcp/backends/pyvisa_backend.py",
-        "src/visa_mcp/backends/mock_backend.py",
-        "src/visa_mcp/dev/split_rehearsal.py",
+        "src/lab_visa_mcp/backends/base.py",
+        "src/lab_visa_mcp/backends/pyvisa_backend.py",
+        "src/lab_visa_mcp/backends/mock_backend.py",
+        "src/lab_visa_mcp/dev/split_rehearsal.py",
         "tests/test_v111_separation_refactor.py",
         "docs/raw_visa.md",
     ]

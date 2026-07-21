@@ -12,7 +12,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from visa_mcp.session_store import (
+from lab_visa_mcp.session_store import (
     SessionStore, SessionStoreLockTimeout, _file_lock,
 )
 
@@ -53,7 +53,7 @@ def test_upsert_raises_on_lock_timeout(tmp_path, monkeypatch):
     raise する (v2.3.3 の bool 戻り値 → 例外伝播へ変更)。
     """
     s = SessionStore(tmp_path / "s.json")
-    import visa_mcp.session_store as mod
+    import lab_visa_mcp.session_store as mod
     import contextlib
 
     @contextlib.contextmanager
@@ -73,7 +73,7 @@ def test_remove_raises_on_lock_timeout(tmp_path, monkeypatch):
     """v2.3.4: remove も lock timeout で raise。"""
     s = SessionStore(tmp_path / "s.json")
     s.upsert("R", manufacturer="M", model="X", bind_method="manual")
-    import visa_mcp.session_store as mod
+    import lab_visa_mcp.session_store as mod
     import contextlib
 
     @contextlib.contextmanager
@@ -114,7 +114,7 @@ def test_clear_session_returns_store_remove_result(
 ):
     """clear_session の戻り値の removed_from_store は store.remove()
     の戻り値そのまま (disk 再読込後の実際の削除結果)。"""
-    from visa_mcp.session_manager import SessionManager
+    from lab_visa_mcp.session_manager import SessionManager
     store_path = tmp_path / "s.json"
 
     # SessionManager 経由で 1 件 bind してから、別 process simulate で
@@ -150,7 +150,7 @@ def test_clear_session_dict_shape(
     tmp_path, fake_registry, fake_visa
 ):
     """clear_session の戻り値が辞書型で必須キーを持つこと。"""
-    from visa_mcp.session_manager import SessionManager
+    from lab_visa_mcp.session_manager import SessionManager
     store = SessionStore(tmp_path / "s.json")
     sm = SessionManager(fake_visa, fake_registry, store=store)
     out = sm.clear_session("nonexistent")
@@ -162,6 +162,6 @@ def test_clear_session_dict_shape(
 
 
 def test_v2_3_3_version():
-    import visa_mcp
-    parts = visa_mcp.__version__.split(".")
+    import lab_visa_mcp
+    parts = lab_visa_mcp.__version__.split(".")
     assert tuple(int(p) for p in parts[:3]) >= (2, 3, 3)

@@ -18,7 +18,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from visa_mcp.tools import export as exp
+from lab_visa_mcp.tools import export as exp
 
 
 def _mgr_with_store(store):
@@ -200,9 +200,9 @@ async def test_export_experiment_results_filtered_csv(
 
 
 def test_v2_6_version():
-    import visa_mcp
-    parts = visa_mcp.__version__.split(".")
-    assert tuple(int(p) for p in parts[:3]) >= (2, 6, 0), visa_mcp.__version__
+    import lab_visa_mcp
+    parts = lab_visa_mcp.__version__.split(".")
+    assert tuple(int(p) for p in parts[:3]) >= (2, 6, 0), lab_visa_mcp.__version__
 
 
 def test_export_fix_sentinel_bumped():
