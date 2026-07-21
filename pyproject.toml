@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "lab-visa-mcp"
-version = "2.8.0"
+version = "2.8.1"
 description = "PyVISA backend + compatibility shim for lab-executor-mcp. Hardware (GPIB / USB / Serial / LAN) communication layer."
 readme = "README.md"
 license = { text = "MIT" }
@@ -65,6 +65,7 @@ include = [
     "/CHANGELOG.md",
     "/LICENSE",
     "/pyproject.toml",
+    "/schemas",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -75,6 +76,13 @@ include = [
 # (Codex v2.3.4 レビュー P0)。packages 側で既に含まれるので
 # force-include からは外す。templates も同様に packages で含まれる。
 packages = ["src/lab_visa_mcp"]
+
+# schemas/ はリポジトリ直下にあり packages に含まれないため wheel に入って
+# いなかった。その結果 `validate schemas` は installed package では対象ゼロの
+# まま成功していた (v2.8.0 まで)。パッケージデータとして同梱する。
+# 配置先が packages 側と重ならないため、v2.3.5 の二重追加問題は起きない。
+[tool.hatch.build.targets.wheel.force-include]
+"schemas" = "lab_visa_mcp/schemas"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

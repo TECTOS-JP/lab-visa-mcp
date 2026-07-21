@@ -44,6 +44,21 @@ from pathlib import Path
 from typing import Any
 
 
+def _bundled_schemas_dir() -> Path | None:
+    """Locate the bundled JSON schemas.
+
+    The wheel force-includes the repository's ``schemas/`` as package data, so
+    an installed package finds them beside this module. A source checkout has
+    them at the repository root instead, which is the layout an editable
+    install sees.
+    """
+    packaged = Path(__file__).parent / "schemas"
+    if packaged.is_dir():
+        return packaged
+    repository = Path(__file__).parent.parent.parent / "schemas"
+    return repository if repository.is_dir() else None
+
+
 def _fmt_human(rep: dict[str, Any]) -> str:
     lines = []
     icon = {"ok": "[OK]", "warning": "[WARN]", "error": "[ERR]"}.get(
@@ -111,10 +126,21 @@ def cmd_validate(args: argparse.Namespace) -> int:
         # schemas/*.schema.json がすべて pretty-printed + preview metadata を
         # 持っているか確認
         from lab_visa_mcp.registry import ValidationReport
-        schemas_dir = (Path(args.path) if args.path
-                       else Path(__file__).parent.parent.parent / "schemas")
+        schemas_dir = Path(args.path) if args.path else _bundled_schemas_dir()
+        found = sorted(schemas_dir.glob("*.schema.json")) if schemas_dir else []
+        if not found:
+            # Validating nothing used to report success: the directory was
+            # resolved relative to the repository layout, so an installed
+            # package looked beside site-packages, found no files, and exited
+            # 0 with an empty report. A check that silently inspects nothing
+            # is worse than one that fails, so this is now an error.
+            print(
+                f"error: no *.schema.json found under {schemas_dir}",
+                file=sys.stderr,
+            )
+            return 1
         reps: list[dict[str, Any]] = []
-        for p in sorted(schemas_dir.glob("*.schema.json")):
+        for p in found:
             rep = ValidationReport(file=str(p), schema=p.name)
             try:
                 text = p.read_text(encoding="utf-8")
