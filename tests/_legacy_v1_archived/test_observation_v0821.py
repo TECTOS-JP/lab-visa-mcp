@@ -17,15 +17,15 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 import yaml
 
-from visa_mcp.job import JobManager, JobStore
-from visa_mcp.job.state_machine import JobStatus
-from visa_mcp.models.instrument_def import InstrumentDefinition
-from visa_mcp.observation import (
+from lab_visa_mcp.job import JobManager, JobStore
+from lab_visa_mcp.job.state_machine import JobStatus
+from lab_visa_mcp.models.instrument_def import InstrumentDefinition
+from lab_visa_mcp.observation import (
     compute_current_phase, compute_job_outcome, event_severity,
     build_run_summary,
 )
-from visa_mcp.session_manager import InstrumentSession
-from visa_mcp.system_config import SystemConfig, InstrumentBinding
+from lab_visa_mcp.session_manager import InstrumentSession
+from lab_visa_mcp.system_config import SystemConfig, InstrumentBinding
 
 
 YAML_PSU = """
@@ -182,7 +182,7 @@ async def test_timeline_invalid_since_returns_validation_error(tmp_path,
                                                                monkeypatch):
     monkeypatch.setenv("VISA_MCP_SAFETY_MODE", "permissive")
     from fastmcp import FastMCP
-    from visa_mcp.tools.observation import register_tools
+    from lab_visa_mcp.tools.observation import register_tools
     mgr, store, _ = _setup(tmp_path)
     try:
         store.create_job("job_t", "", "psu0", "<r>", {})
@@ -212,7 +212,7 @@ async def test_timeline_invalid_until_returns_validation_error(tmp_path,
                                                                monkeypatch):
     monkeypatch.setenv("VISA_MCP_SAFETY_MODE", "permissive")
     from fastmcp import FastMCP
-    from visa_mcp.tools.observation import register_tools
+    from lab_visa_mcp.tools.observation import register_tools
     mgr, store, _ = _setup(tmp_path)
     try:
         store.create_job("job_t2", "", "psu0", "<r>", {})
@@ -233,7 +233,7 @@ async def test_timeline_pagination_returns_next_cursor(tmp_path, monkeypatch):
     """next_since は廃止 / next_cursor: {timestamp, event_id} を返す"""
     monkeypatch.setenv("VISA_MCP_SAFETY_MODE", "permissive")
     from fastmcp import FastMCP
-    from visa_mcp.tools.observation import register_tools
+    from lab_visa_mcp.tools.observation import register_tools
     mgr, store, _ = _setup(tmp_path)
     try:
         store.create_job("job_pc", "", "psu0", "<r>", {})
@@ -264,7 +264,7 @@ async def test_timeline_pagination_no_more_when_within_limit(
 ):
     monkeypatch.setenv("VISA_MCP_SAFETY_MODE", "permissive")
     from fastmcp import FastMCP
-    from visa_mcp.tools.observation import register_tools
+    from lab_visa_mcp.tools.observation import register_tools
     mgr, store, _ = _setup(tmp_path)
     try:
         store.create_job("job_pcc", "", "psu0", "<r>", {})

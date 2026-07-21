@@ -1,5 +1,52 @@
 # 変更履歴
 
+## v2.8.0 — lab-visa-mcp へ改名し、backend 規約へ揃える
+
+合言葉: **「同じ棚に並ぶものは、同じ名前の付け方で」**
+
+### 破壊的変更: 配布名と import 名の変更
+
+エコシステムの他 backend (`lab-modbus-mcp` / `lab-ble-mcp` / `lab-nidaq-mcp`)
+と命名を揃える。
+
+| | 旧 | 新 |
+| --- | --- | --- |
+| 配布名 | `visa-mcp` | **`lab-visa-mcp`** |
+| import 名 | `visa_mcp` | **`lab_visa_mcp`** |
+| CLI | `visa-mcp` | **`lab-visa-mcp`** |
+
+`lab_visa_mcp` は旧 import 名の shim を持たない。移行のため、旧配布名
+`visa-mcp` を最後に一度だけ更新し、`lab-visa-mcp` に依存して `visa_mcp`
+という名前を提供するパッケージとする。既存利用者はそれで動き続けるが、
+新規は `lab-visa-mcp` を直接使うこと。
+
+**`lab-executor-mcp` は 2.36.0 まで `visa_mcp` を遅延 import している。**
+VISA を使う場合は移行 shim を入れるか、`lab_visa_mcp` を参照する版へ更新する
+こと。VISA 経路を使わない利用者には影響しない。
+
+### backend 規約への追従 (step 4)
+
+このリポジトリはエコシステム最古参で、後から確立した backend 規約を唯一
+満たしていなかった。
+
+- **凍結契約の二重定義を解消**。`backends/base.py` が `InstrumentBackend`
+  Protocol の写しを持っていた。v2.0 分割前、両リポジトリが共有 Protocol を
+  「見ていた」頃の名残である。内容は完全一致していたが、写しは静かにずれる。
+  `lab_executor.backends.base` への deprecated 再エクスポート shim にし、
+  定義を1つにした。
+- **entry point を追加**し、`lab-executor serve --backends visa` や
+  `_system.yaml` から選べるようにした。ルーティング接頭辞は実際の PyVISA
+  リソース表記 (`GPIB` / `VXI` / `ASRL` / `PXI` / `TCPIP` / `USB` / `VICP` /
+  `PRLGX-*`)。`VISA::` のような接頭辞は発明していない。既存のリソース文字列が
+  壊れるため。
+- **BEF 適合テストを追加**。スタブを注入するため実機も VISA ランタイムも不要。
+- **CI を他 backend と同じ強度へ**。従来は import smoke と 1 ファイルのみを
+  実行していた。unit / BEF 適合 / latest-release-integration /
+  main-compatibility-smoke (continue-on-error) / build の構成にした。
+- **`pytest -q` が動かない問題を解消**。`tests/_legacy_v1_archived/` が削除済み
+  private 関数を参照し収集段階で落ちていた。既定の収集から除外した
+  (ファイルは削除していない)。
+
 ## v2.7.0 — 実機 serve でも Web UI M4 コントロールプレーンを有効化 / 初の PyPI 公開
 
 合言葉: **「実機の関所にも、同じ鍵の受け渡し口を付ける」**

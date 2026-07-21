@@ -18,11 +18,11 @@ from pathlib import Path
 
 _THIS = Path(__file__).resolve()
 REPO_ROOT = _THIS.parent.parent
-SRC_ROOT = REPO_ROOT / "src" / "visa_mcp"
+SRC_ROOT = REPO_ROOT / "src" / "lab_visa_mcp"
 
 # v2.0 shim 対象: 単一 file
 SINGLE_FILE_SHIMS = [
-    # (visa_mcp path under src/visa_mcp/, lab_executor module path)
+    # (lab_visa_mcp path under src/lab_visa_mcp/, lab_executor module path)
     ("audit.py", "lab_executor.audit"),
     ("extension.py", "lab_executor.extension"),
     ("extension_authoring.py", "lab_executor.extension_authoring"),
@@ -47,7 +47,7 @@ SINGLE_FILE_SHIMS = [
 
 # v2.0 shim 対象: package (submodule alias 含む)
 PACKAGE_SHIMS = [
-    # (visa_mcp package, lab_executor package, submodules to alias)
+    # (lab_visa_mcp package, lab_executor package, submodules to alias)
     ("dsl", "lab_executor.dsl",
         ["compiler", "schema", "template"]),
     ("job", "lab_executor.job",
@@ -70,12 +70,12 @@ def make_single_file_shim(visa_name: str, le_module: str) -> str:
 
 This module previously contained the visa-mcp v1.x implementation.
 In v2.0 the experiment-execution runtime moved to
-`lab-executor-mcp`. Importing `visa_mcp.{visa_name.replace(".py","")}`
+`lab-executor-mcp`. Importing `lab_visa_mcp.{visa_name.replace(".py","")}`
 now forwards to `{le_module}` with a DeprecationWarning.
 
 Migration:
     # old
-    from visa_mcp.{visa_name.replace(".py","")} import X
+    from lab_visa_mcp.{visa_name.replace(".py","")} import X
     # new
     from {le_module} import X
 
@@ -86,7 +86,7 @@ from __future__ import annotations
 import warnings as _warnings
 
 _warnings.warn(
-    "visa_mcp.{visa_name.replace(".py","")} is deprecated; "
+    "lab_visa_mcp.{visa_name.replace(".py","")} is deprecated; "
     "use {le_module} instead.",
     DeprecationWarning,
     stacklevel=2,
@@ -103,20 +103,20 @@ def make_package_init_shim(visa_pkg: str, le_pkg: str,
         for sm in submodules
     )
     submod_aliases = "\n".join(
-        f'    "visa_mcp.{visa_pkg}.{sm}": _sub_{sm},'
+        f'    "lab_visa_mcp.{visa_pkg}.{sm}": _sub_{sm},'
         for sm in submodules
     )
     return f'''"""DEPRECATED shim package → `{le_pkg}` (visa-mcp v2.0)
 
 This package previously contained the visa-mcp v1.x
 implementation. In v2.0 the experiment-execution runtime moved to
-`lab-executor-mcp`. Importing `visa_mcp.{visa_pkg}` now forwards to
+`lab-executor-mcp`. Importing `lab_visa_mcp.{visa_pkg}` now forwards to
 `{le_pkg}` with a DeprecationWarning.
 
 Migration:
     # old
-    from visa_mcp.{visa_pkg} import X
-    from visa_mcp.{visa_pkg}.compiler import Y
+    from lab_visa_mcp.{visa_pkg} import X
+    from lab_visa_mcp.{visa_pkg}.compiler import Y
     # new
     from {le_pkg} import X
     from {le_pkg}.compiler import Y
@@ -129,7 +129,7 @@ import sys as _sys
 import warnings as _warnings
 
 _warnings.warn(
-    "visa_mcp.{visa_pkg} is deprecated; use {le_pkg} instead.",
+    "lab_visa_mcp.{visa_pkg} is deprecated; use {le_pkg} instead.",
     DeprecationWarning,
     stacklevel=2,
 )
@@ -140,7 +140,7 @@ import {le_pkg} as _le  # noqa: E402
 from {le_pkg} import *  # noqa: F401,F403,E402
 
 # Submodule import + aliasing so
-# `from visa_mcp.{visa_pkg}.<sub> import X` resolves through
+# `from lab_visa_mcp.{visa_pkg}.<sub> import X` resolves through
 # `{le_pkg}.<sub>`.
 {submod_imports}
 _submodules: dict[str, object] = {{

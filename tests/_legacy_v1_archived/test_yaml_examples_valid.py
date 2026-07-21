@@ -1,6 +1,6 @@
 """examples/instruments/ に同梱した YAML がスキーマ的に有効であることを確認するテスト。"""
 from pathlib import Path
-from visa_mcp.instrument_registry import InstrumentRegistry
+from lab_visa_mcp.instrument_registry import InstrumentRegistry
 
 EXAMPLES_DIR = Path(__file__).parent.parent / "examples" / "instruments"
 

@@ -9,7 +9,7 @@ import asyncio
 
 import pytest
 
-from visa_mcp.visa_manager import VisaManager
+from lab_visa_mcp.visa_manager import VisaManager
 
 
 class _FakeProbeManager(VisaManager):
@@ -192,6 +192,6 @@ async def test_diagnostic_schema_version():
 
 
 def test_v2_5_0_version():
-    import visa_mcp
-    parts = visa_mcp.__version__.split(".")
+    import lab_visa_mcp
+    parts = lab_visa_mcp.__version__.split(".")
     assert tuple(int(p) for p in parts[:3]) >= (2, 5, 0)

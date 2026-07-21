@@ -1,6 +1,6 @@
 """v0.4.x raw command 安全対策のテスト"""
 import pytest
-from visa_mcp.tools.commands import _detect_dangerous_keywords
+from lab_visa_mcp.tools.commands import _detect_dangerous_keywords
 
 
 def test_query_form_is_safe():
@@ -67,7 +67,7 @@ def test_benign_commands_not_detected():
 
 def test_dangerous_keywords_module_import():
     """モジュールが import できる (環境変数で raw 機能の有効/無効が切り替わる)"""
-    from visa_mcp.tools import commands
+    from lab_visa_mcp.tools import commands
     assert hasattr(commands, "RAW_COMMANDS_ENABLED")
     assert hasattr(commands, "_DANGEROUS_PATTERNS")
     labels = [label for label, _ in commands._DANGEROUS_PATTERNS]

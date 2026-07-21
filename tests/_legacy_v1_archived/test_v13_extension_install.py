@@ -9,8 +9,8 @@ from pathlib import Path
 import pytest
 import yaml
 
-from visa_mcp import stability
-from visa_mcp.extension_install import (
+from lab_visa_mcp import stability
+from lab_visa_mcp.extension_install import (
     install_definition_pack, list_installed_packs,
     uninstall_definition_pack, load_overlay_registry,
 )
@@ -25,9 +25,9 @@ ROOT = Path(__file__).parent.parent
 
 
 def test_version_v1_3_0():
-    import visa_mcp
+    import lab_visa_mcp
     # v1.3 系列以降の v1.x を許容
-    assert visa_mcp.__version__.startswith("1.")
+    assert lab_visa_mcp.__version__.startswith("1.")
 
 
 # =========================================================
@@ -322,7 +322,7 @@ def test_overlay_registry_no_extensions_works(temp_env):
 
 def test_cli_extension_help_includes_install_list_uninstall():
     result = subprocess.run(
-        [sys.executable, "-m", "visa_mcp.cli", "extension", "--help"],
+        [sys.executable, "-m", "lab_visa_mcp.cli", "extension", "--help"],
         capture_output=True, text=True, cwd=str(ROOT),
     )
     out = result.stdout + result.stderr
@@ -346,7 +346,7 @@ def test_cli_extension_list_empty_returns_zero(tmp_path):
 
 
 V13_FILES = [
-    "src/visa_mcp/extension_install.py",
+    "src/lab_visa_mcp/extension_install.py",
     "docs/extension_install.md",
     "docs/extension_registry_overlay.md",
     "tests/test_v13_extension_install.py",

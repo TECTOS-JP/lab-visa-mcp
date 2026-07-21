@@ -6,10 +6,10 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 import yaml
 
-from visa_mcp.job import CancelMode, JobManager, JobStore
-from visa_mcp.job.state_machine import JobStatus, is_terminal
-from visa_mcp.models.instrument_def import InstrumentDefinition
-from visa_mcp.session_manager import InstrumentSession
+from lab_visa_mcp.job import CancelMode, JobManager, JobStore
+from lab_visa_mcp.job.state_machine import JobStatus, is_terminal
+from lab_visa_mcp.models.instrument_def import InstrumentDefinition
+from lab_visa_mcp.session_manager import InstrumentSession
 
 
 SAMPLE_YAML = """
@@ -72,7 +72,7 @@ def setup(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_event_eagerly_created():
     """_JobRuntime._start_event は __init__ で生成される (lost wake-up 防止)"""
-    from visa_mcp.job.manager import _JobRuntime
+    from lab_visa_mcp.job.manager import _JobRuntime
     import asyncio as _asyncio
 
     async def _coro():

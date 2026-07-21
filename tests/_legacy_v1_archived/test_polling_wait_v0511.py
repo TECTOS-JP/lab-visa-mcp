@@ -11,15 +11,15 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 import yaml
 
-from visa_mcp.experiment_ir import (
+from lab_visa_mcp.experiment_ir import (
     WaitForConditionStep, WaitForStableStep, WaitUntilStep,
 )
-from visa_mcp.models.instrument_def import InstrumentDefinition
-from visa_mcp.polling_executor import (
+from lab_visa_mcp.models.instrument_def import InstrumentDefinition
+from lab_visa_mcp.polling_executor import (
     execute_wait_for_condition,
     execute_wait_until,
 )
-from visa_mcp.session_manager import InstrumentSession
+from lab_visa_mcp.session_manager import InstrumentSession
 
 
 # === wait_for_condition の polling_safe_warning ===
@@ -112,7 +112,7 @@ recipes:
 @pytest.mark.asyncio
 async def test_execute_recipe_rejects_polling_step():
     """同期 execute_recipe で polling step を踏むと AsyncStepRequiresJob を返す"""
-    from visa_mcp.recipe_executor import execute_recipe
+    from lab_visa_mcp.recipe_executor import execute_recipe
     d = InstrumentDefinition(**yaml.safe_load(textwrap.dedent(RECIPE_WITH_POLLING_YAML)))
     session = InstrumentSession(
         resource_name="PSU::INSTR", idn_response="<x>",
@@ -167,7 +167,7 @@ commands:
         resource_name="TEMP::INSTR", idn_response="<x>",
         idn_parsed={}, definition=d,
     )
-    from visa_mcp.visa_manager import VisaError
+    from lab_visa_mcp.visa_manager import VisaError
 
     visa = MagicMock()
     calls = {"n": 0}

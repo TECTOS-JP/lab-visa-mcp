@@ -1,6 +1,6 @@
 from unittest.mock import MagicMock
-from visa_mcp.session_manager import SessionManager
-from visa_mcp.instrument_registry import InstrumentRegistry
+from lab_visa_mcp.session_manager import SessionManager
+from lab_visa_mcp.instrument_registry import InstrumentRegistry
 
 
 def test_bind_manually_success(tmp_path):

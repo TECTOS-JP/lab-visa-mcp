@@ -13,7 +13,7 @@ import asyncio
 
 import pytest
 
-from visa_mcp.visa_manager import (
+from lab_visa_mcp.visa_manager import (
     VisaManager, VisaError, VisaTimeoutError, _PYVISA_AVAILABLE,
 )
 
@@ -147,8 +147,8 @@ async def test_elapsed_ms_is_numeric():
 
 
 def test_v2_4_0_version():
-    import visa_mcp
-    parts = visa_mcp.__version__.split(".")
+    import lab_visa_mcp
+    parts = lab_visa_mcp.__version__.split(".")
     assert tuple(int(p) for p in parts[:3]) >= (2, 4, 0)
 
 
@@ -204,6 +204,6 @@ async def test_diagnostic_schema_version_2_4_1():
 
 
 def test_v2_4_1_version():
-    import visa_mcp
-    parts = visa_mcp.__version__.split(".")
+    import lab_visa_mcp
+    parts = lab_visa_mcp.__version__.split(".")
     assert tuple(int(p) for p in parts[:3]) >= (2, 4, 1)

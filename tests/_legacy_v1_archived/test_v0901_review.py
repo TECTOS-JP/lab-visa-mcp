@@ -13,12 +13,12 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 import yaml
 
-from visa_mcp.job import JobManager, JobStore
-from visa_mcp.job.state_machine import JobStatus
-from visa_mcp.models.instrument_def import InstrumentDefinition
-from visa_mcp.session_manager import InstrumentSession
-from visa_mcp.system_config import SystemConfig, InstrumentBinding
-from visa_mcp.testing.benchmark_task import (
+from lab_visa_mcp.job import JobManager, JobStore
+from lab_visa_mcp.job.state_machine import JobStatus
+from lab_visa_mcp.models.instrument_def import InstrumentDefinition
+from lab_visa_mcp.session_manager import InstrumentSession
+from lab_visa_mcp.system_config import SystemConfig, InstrumentBinding
+from lab_visa_mcp.testing.benchmark_task import (
     BenchmarkTask, Fixtures, load_benchmark_task,
 )
 
@@ -200,7 +200,7 @@ async def test_benchmark_runner_applies_safety_mode_override(
 ):
     """task.fixtures.safety_mode が runner で OS env に設定される"""
     monkeypatch.setenv("VISA_MCP_SAFETY_MODE", "permissive")
-    from visa_mcp.testing.benchmark_runner import run_task_file
+    from lab_visa_mcp.testing.benchmark_runner import run_task_file
     res = await run_task_file(
         ROOT / "benchmarks" / "tasks" / "task_004_verify_mismatch.yaml",
         ROOT / "benchmarks", tmp_path,

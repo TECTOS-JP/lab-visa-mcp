@@ -1,7 +1,7 @@
 """ResourceScheduler 単体テスト (v0.5.0.2)"""
 import pytest
 
-from visa_mcp.job.scheduler import ResourceScheduler, ResourceBusyError
+from lab_visa_mcp.job.scheduler import ResourceScheduler, ResourceBusyError
 
 
 @pytest.mark.asyncio

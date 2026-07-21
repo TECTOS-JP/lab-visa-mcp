@@ -8,12 +8,12 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 import yaml
 
-from visa_mcp.audit import AuditStore, summarize_for_audit
-from visa_mcp.job import JobManager, JobStore
-from visa_mcp.job.state_machine import JobStatus
-from visa_mcp.models.instrument_def import InstrumentDefinition
-from visa_mcp.session_manager import InstrumentSession
-from visa_mcp.system_config import SystemConfig, InstrumentBinding
+from lab_visa_mcp.audit import AuditStore, summarize_for_audit
+from lab_visa_mcp.job import JobManager, JobStore
+from lab_visa_mcp.job.state_machine import JobStatus
+from lab_visa_mcp.models.instrument_def import InstrumentDefinition
+from lab_visa_mcp.session_manager import InstrumentSession
+from lab_visa_mcp.system_config import SystemConfig, InstrumentBinding
 
 
 YAML_PSU = """
@@ -378,7 +378,7 @@ async def test_query_audit_tool(tmp_path, monkeypatch):
         mgr.audit.record_event("tool_called", owner="agent_x",
                                  job_id="j1")
         from fastmcp import FastMCP
-        from visa_mcp.tools.audit import register_tools
+        from lab_visa_mcp.tools.audit import register_tools
         mcp = FastMCP("t")
         register_tools(mcp, mgr)
         tool = await mcp.get_tool("query_audit")
@@ -397,7 +397,7 @@ async def test_list_locks_tool(tmp_path, monkeypatch):
     try:
         mgr.audit.acquire_lock("psu001", owner="a", job_id="j1")
         from fastmcp import FastMCP
-        from visa_mcp.tools.audit import register_tools
+        from lab_visa_mcp.tools.audit import register_tools
         mcp = FastMCP("t")
         register_tools(mcp, mgr)
         tool = await mcp.get_tool("list_locks")

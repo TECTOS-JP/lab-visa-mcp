@@ -11,11 +11,11 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 import yaml
 
-from visa_mcp.dsl.template import apply_template_override
-from visa_mcp.job import JobManager, JobStore
-from visa_mcp.models.instrument_def import InstrumentDefinition
-from visa_mcp.session_manager import InstrumentSession
-from visa_mcp.system_config import (
+from lab_visa_mcp.dsl.template import apply_template_override
+from lab_visa_mcp.job import JobManager, JobStore
+from lab_visa_mcp.models.instrument_def import InstrumentDefinition
+from lab_visa_mcp.session_manager import InstrumentSession
+from lab_visa_mcp.system_config import (
     SystemConfig, InstrumentBinding, ExperimentUnit,
 )
 
@@ -120,7 +120,7 @@ async def test_response_includes_effective_owner(tmp_path, monkeypatch):
             name="t_owner", dsl_version="0.8", plan=_tpl(),
         )
         from fastmcp import FastMCP
-        from visa_mcp.tools.dsl import register_tools
+        from lab_visa_mcp.tools.dsl import register_tools
         mcp = FastMCP("test")
         register_tools(mcp, sm, mgr)
         tool = await mcp.get_tool("start_experiment_job_from_template")
@@ -143,7 +143,7 @@ async def test_override_owner_takes_precedence(tmp_path, monkeypatch):
             name="t_ovow", dsl_version="0.8", plan=_tpl(),
         )
         from fastmcp import FastMCP
-        from visa_mcp.tools.dsl import register_tools
+        from lab_visa_mcp.tools.dsl import register_tools
         mcp = FastMCP("test")
         register_tools(mcp, sm, mgr)
         tool = await mcp.get_tool("start_experiment_job_from_template")
@@ -172,7 +172,7 @@ async def test_dry_run_does_not_modify_template(tmp_path, monkeypatch):
             name="t_dr", dsl_version="0.8", plan=original,
         )
         from fastmcp import FastMCP
-        from visa_mcp.tools.dsl import register_tools
+        from lab_visa_mcp.tools.dsl import register_tools
         mcp = FastMCP("test")
         register_tools(mcp, sm, mgr)
         tool = await mcp.get_tool("start_experiment_job_from_template")

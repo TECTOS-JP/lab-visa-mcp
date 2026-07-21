@@ -1,6 +1,6 @@
 """safe_eval (式評価) のテスト"""
 import pytest
-from visa_mcp.utils.expression import safe_eval, resolve_arg, ExpressionError
+from lab_visa_mcp.utils.expression import safe_eval, resolve_arg, ExpressionError
 
 
 def test_simple_number():

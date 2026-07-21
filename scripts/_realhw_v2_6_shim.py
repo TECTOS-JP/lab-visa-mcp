@@ -1,6 +1,6 @@
-"""v2.6 実機 E2E: visa_mcp.tools.export (shim copy) の sweep 列 + フィルタ。
+"""v2.6 実機 E2E: lab_visa_mcp.tools.export (shim copy) の sweep 列 + フィルタ。
 
-visa-mcp serve が登録するのは visa_mcp.tools.export の独自コピー。
+visa-mcp serve が登録するのは lab_visa_mcp.tools.export の独自コピー。
 これが lab-executor v2.18/v2.19 と同じ列・フィルタを返すか実機で確認する。
 
 ユーザ承認済み (レジスタ加熱配線): PMX35-3A を 1->3V sweep。
@@ -20,16 +20,16 @@ sys.path.insert(0, str(ROOT / "src"))
 LE_SRC = ROOT.parent / "lab-executor-mcp" / "src"
 sys.path.insert(0, str(LE_SRC))
 
-import visa_mcp  # noqa
+import lab_visa_mcp  # noqa
 import lab_executor  # noqa
-print(f"[versions] visa_mcp={visa_mcp.__version__}, "
+print(f"[versions] lab_visa_mcp={lab_visa_mcp.__version__}, "
       f"lab_executor={lab_executor.__version__}")
 
-from visa_mcp.visa_manager import VisaManager
-from visa_mcp.session_manager import SessionManager
-from visa_mcp.instrument_registry import InstrumentRegistry
-from visa_mcp.job import JobManager, JobStore  # = lab_executor.job (shim)
-from visa_mcp.tools import export as exp        # shim copy under test
+from lab_visa_mcp.visa_manager import VisaManager
+from lab_visa_mcp.session_manager import SessionManager
+from lab_visa_mcp.instrument_registry import InstrumentRegistry
+from lab_visa_mcp.job import JobManager, JobStore  # = lab_executor.job (shim)
+from lab_visa_mcp.tools import export as exp        # shim copy under test
 from fastmcp import FastMCP
 
 
@@ -40,7 +40,7 @@ async def main() -> int:
     os.environ["VISA_MCP_EXPORT_DIR"] = str(export_dir)
     print(f"[export module] {exp.__file__}")
     print(f"[export_dir] {export_dir}")
-    assert "visa_mcp" in exp.__file__, "shim copy を使うこと"
+    assert "lab_visa_mcp" in exp.__file__, "shim copy を使うこと"
 
     examples = ROOT / "examples" / "instruments"
     registry = InstrumentRegistry(str(examples))

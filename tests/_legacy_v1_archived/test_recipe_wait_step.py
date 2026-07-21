@@ -6,10 +6,10 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 import yaml
 
-from visa_mcp.models.instrument_def import InstrumentDefinition, RecipeStep
-from visa_mcp.session_manager import InstrumentSession
-from visa_mcp.recipe_executor import execute_recipe, recipe_to_plan
-from visa_mcp.experiment_ir import CommandStep, WaitStep
+from lab_visa_mcp.models.instrument_def import InstrumentDefinition, RecipeStep
+from lab_visa_mcp.session_manager import InstrumentSession
+from lab_visa_mcp.recipe_executor import execute_recipe, recipe_to_plan
+from lab_visa_mcp.experiment_ir import CommandStep, WaitStep
 
 
 # === RecipeStep schema 検証 (新規 wait step) ===

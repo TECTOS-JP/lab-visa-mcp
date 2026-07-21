@@ -19,13 +19,13 @@ from pathlib import Path
 import pytest
 import yaml
 
-from visa_mcp import stability
-from visa_mcp.extension_authoring import init_extension_pack
-from visa_mcp.instrument_authoring import (
+from lab_visa_mcp import stability
+from lab_visa_mcp.extension_authoring import init_extension_pack
+from lab_visa_mcp.instrument_authoring import (
     CATEGORIES, scaffold_instrument_definition,
     add_instrument_to_pack,
 )
-from visa_mcp.registry import validate_instrument_file
+from lab_visa_mcp.registry import validate_instrument_file
 
 ROOT = Path(__file__).parent.parent
 
@@ -36,8 +36,8 @@ ROOT = Path(__file__).parent.parent
 
 
 def test_version_v1_8_0():
-    import visa_mcp
-    assert visa_mcp.__version__.startswith("1.")
+    import lab_visa_mcp
+    assert lab_visa_mcp.__version__.startswith("1.")
 
 
 def test_no_new_mcp_tools_in_v1_8():
@@ -361,7 +361,7 @@ def test_add_instrument_validates_pack_after_update(fresh_pack):
     )
     assert res.status == "ok"
     # validate extension は別 module だが、ここでは pack 整合の確認
-    from visa_mcp.extension import validate_extension_file
+    from lab_visa_mcp.extension import validate_extension_file
     rep = validate_extension_file(fresh_pack / "extension.yaml")
     assert not rep.errors
 
@@ -387,7 +387,7 @@ def test_e2e_init_then_add_multiple_instruments(tmp_path):
         )
         assert r.status == "ok", (iid, cat, r.errors)
     # 最終 pack validate
-    from visa_mcp.extension import validate_extension_file
+    from lab_visa_mcp.extension import validate_extension_file
     rep = validate_extension_file(pack / "extension.yaml")
     assert not rep.errors
     # 3 instruments + 1 example_instrument (from init) = 4
@@ -404,7 +404,7 @@ def test_e2e_init_then_add_multiple_instruments(tmp_path):
 
 def _run_cli(*args: str) -> tuple[int, str, str]:
     r = subprocess.run(
-        [sys.executable, "-m", "visa_mcp.cli", *args],
+        [sys.executable, "-m", "lab_visa_mcp.cli", *args],
         capture_output=True, text=True, cwd=str(ROOT),
     )
     return r.returncode, r.stdout, r.stderr
@@ -461,8 +461,8 @@ def test_cli_extension_add_instrument_dry_run_runs(tmp_path):
 
 
 V18_FILES = [
-    "src/visa_mcp/instrument_authoring.py",
-    "src/visa_mcp/cli.py",
+    "src/lab_visa_mcp/instrument_authoring.py",
+    "src/lab_visa_mcp/cli.py",
     "docs/instrument_authoring.md",
     "CONTRIBUTING.md",
     "tests/test_v18_instrument_authoring.py",

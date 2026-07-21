@@ -19,7 +19,7 @@ import pytest
 
 
 def test_serve_parser_accepts_control_port():
-    from visa_mcp.cli import build_parser
+    from lab_visa_mcp.cli import build_parser
 
     parser = build_parser()
     args = parser.parse_args(["serve", "--control-port", "8300"])
@@ -28,7 +28,7 @@ def test_serve_parser_accepts_control_port():
 
 
 def test_serve_parser_control_port_defaults_none():
-    from visa_mcp.cli import build_parser
+    from lab_visa_mcp.cli import build_parser
 
     parser = build_parser()
     args = parser.parse_args(["serve"])
@@ -41,7 +41,7 @@ def test_serve_parser_control_port_defaults_none():
 
 
 def test_main_none_uses_legacy_stdio(monkeypatch):
-    from visa_mcp import server
+    from lab_visa_mcp import server
 
     # env も無ければ resolve は None を返す → 従来経路。
     monkeypatch.delenv("LAB_EXECUTOR_CONTROL_PORT", raising=False)
@@ -68,7 +68,7 @@ def test_main_none_uses_legacy_stdio(monkeypatch):
 def test_main_none_with_env_delegates(monkeypatch):
     """env LAB_EXECUTOR_CONTROL_PORT が設定されていれば control_port=None
     でも委譲経路 (asyncio.run(run_mcp_with_control(...))) に入る。"""
-    from visa_mcp import server
+    from lab_visa_mcp import server
 
     monkeypatch.setenv("LAB_EXECUTOR_CONTROL_PORT", "8300")
 
@@ -102,7 +102,7 @@ def test_main_none_with_env_delegates(monkeypatch):
 
 
 def test_main_port_delegates_to_runner(monkeypatch):
-    from visa_mcp import server
+    from lab_visa_mcp import server
 
     monkeypatch.delenv("LAB_EXECUTOR_CONTROL_PORT", raising=False)
 

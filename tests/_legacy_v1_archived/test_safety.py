@@ -6,8 +6,8 @@ from pathlib import Path
 import pytest
 import yaml
 
-from visa_mcp.models.instrument_def import InstrumentDefinition
-from visa_mcp import safety as sf
+from lab_visa_mcp.models.instrument_def import InstrumentDefinition
+from lab_visa_mcp import safety as sf
 
 
 def _load_def(yaml_str: str) -> InstrumentDefinition:

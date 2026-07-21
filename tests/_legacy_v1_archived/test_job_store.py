@@ -2,8 +2,8 @@
 import os
 import pytest
 
-from visa_mcp.job.state_machine import JobStatus, IllegalTransitionError
-from visa_mcp.job.store import JobStore
+from lab_visa_mcp.job.state_machine import JobStatus, IllegalTransitionError
+from lab_visa_mcp.job.store import JobStore
 
 
 @pytest.fixture
@@ -125,7 +125,7 @@ def test_mark_interrupted_on_startup(store):
 
 
 def test_default_store_path_uses_env(monkeypatch, tmp_path):
-    from visa_mcp.job.store import default_store_path
+    from lab_visa_mcp.job.store import default_store_path
     p = tmp_path / "custom.sqlite"
     monkeypatch.setenv("VISA_MCP_STATE_DB", str(p))
     assert default_store_path() == p

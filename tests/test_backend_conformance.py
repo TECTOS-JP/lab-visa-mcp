@@ -4,7 +4,7 @@ import pytest
 
 from lab_executor.testing.backend_conformance import assert_backend_contract
 
-from visa_mcp.backends.pyvisa_backend import PyVisaBackend
+from lab_visa_mcp.backends.pyvisa_backend import PyVisaBackend
 
 
 SAMPLE_RESOURCE = "GPIB0::1::INSTR"

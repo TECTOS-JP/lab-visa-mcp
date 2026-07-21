@@ -3,8 +3,8 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "visa-mcp"
-version = "2.7.0"
+name = "lab-visa-mcp"
+version = "2.8.0"
 description = "PyVISA backend + compatibility shim for lab-executor-mcp. Hardware (GPIB / USB / Serial / LAN) communication layer."
 readme = "README.md"
 license = { text = "MIT" }
@@ -24,7 +24,7 @@ classifiers = [
 ]
 dependencies = [
     # v2.0: runtime / DSL / extension ecosystem は lab-executor-mcp
-    # 側へ移った。visa-mcp は PyVISA backend + 旧 import shim。
+    # 側へ移った。lab-visa-mcp は PyVISA backend + 旧 import shim。
     "lab-executor-mcp>=2.24.0,<3.0.0",
     "pyvisa>=1.14.0",
     "pydantic>=2.0.1",
@@ -43,14 +43,14 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/TECTOS-JP/visa-mcp"
-Issues = "https://github.com/TECTOS-JP/visa-mcp/issues"
+Homepage = "https://github.com/TECTOS-JP/lab-visa-mcp"
+Issues = "https://github.com/TECTOS-JP/lab-visa-mcp/issues"
 
 [project.entry-points."lab_executor.backends"]
-visa = "visa_mcp.discovery:make_backend"
+visa = "lab_visa_mcp.discovery:make_backend"
 
 [project.scripts]
-visa-mcp = "visa_mcp.cli:main"
+lab-visa-mcp = "lab_visa_mcp.cli:main"
 
 [tool.hatch.build.targets.sdist]
 # 既定では作業ディレクトリの全てが入り、ローカルの venv / パッケージ
@@ -58,7 +58,7 @@ visa-mcp = "visa_mcp.cli:main"
 # 必要物のみを allowlist 指定する。先頭 "/" でルートに固定すること
 # (裸の "LICENSE" 等はどの階層にもマッチし site-packages を巻き込む)。
 include = [
-    "/src/visa_mcp",
+    "/src/lab_visa_mcp",
     "/tests",
     "/docs",
     "/README.md",
@@ -68,13 +68,13 @@ include = [
 ]
 
 [tool.hatch.build.targets.wheel]
-# `packages = ["src/visa_mcp"]` により src/visa_mcp 配下の全ファイル
+# `packages = ["src/lab_visa_mcp"]` により src/lab_visa_mcp 配下の全ファイル
 # (templates/, builtin_instruments/ の YAML 含む) が wheel に入る。
 # v2.3.5: builtin_instruments を force-include にも入れていたため
 # `_system.yaml` が二重追加されて wheel build が失敗していた
 # (Codex v2.3.4 レビュー P0)。packages 側で既に含まれるので
 # force-include からは外す。templates も同様に packages で含まれる。
-packages = ["src/visa_mcp"]
+packages = ["src/lab_visa_mcp"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

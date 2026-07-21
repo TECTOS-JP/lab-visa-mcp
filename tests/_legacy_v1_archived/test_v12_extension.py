@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from visa_mcp import stability
-from visa_mcp.extension import (
+from lab_visa_mcp import stability
+from lab_visa_mcp.extension import (
     ExtensionManifest, validate_extension_file, SUPPORT_LEVELS,
 )
 
@@ -22,8 +22,8 @@ ROOT = Path(__file__).parent.parent
 
 def test_version_v1_2_0():
     """v1.2+ の v1.x 系列を許容"""
-    import visa_mcp
-    assert visa_mcp.__version__.startswith("1.")
+    import lab_visa_mcp
+    assert lab_visa_mcp.__version__.startswith("1.")
 
 
 # =========================================================
@@ -38,7 +38,7 @@ REQUIRED_DOCS = [
     ]),
     ("docs/definition_packs.md", [
         "extension_id", "executable_code", "support_level",
-        "visa_mcp_compatibility",
+        "lab_visa_mcp_compatibility",
     ]),
     ("docs/registry_contribution.md", [
         "support_level", "verified", "tested", "experimental", "draft",
@@ -224,7 +224,7 @@ def test_extension_manifest_schema_status_experimental():
 
 
 def _run_cli(*args: str) -> tuple[int, dict]:
-    cmd = [sys.executable, "-m", "visa_mcp.cli", *args, "--json"]
+    cmd = [sys.executable, "-m", "lab_visa_mcp.cli", *args, "--json"]
     result = subprocess.run(cmd, capture_output=True, text=True, cwd=str(ROOT))
     try:
         data = json.loads(result.stdout) if result.stdout.strip() else {}
@@ -288,7 +288,7 @@ V12_FILES = [
     "docs/definition_packs.md",
     "docs/registry_contribution.md",
     "docs/replay_backend_concept.md",
-    "src/visa_mcp/extension.py",
+    "src/lab_visa_mcp/extension.py",
     "examples/extensions/mock_basic_pack/extension.yaml",
     "examples/extensions/mock_basic_pack/README.md",
     "tests/test_v12_extension.py",

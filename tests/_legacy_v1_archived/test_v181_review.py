@@ -16,12 +16,12 @@ from pathlib import Path
 import pytest
 import yaml
 
-from visa_mcp.extension_authoring import init_extension_pack
-from visa_mcp.instrument_authoring import (
+from lab_visa_mcp.extension_authoring import init_extension_pack
+from lab_visa_mcp.instrument_authoring import (
     CATEGORIES, scaffold_instrument_definition,
     add_instrument_to_pack, _load_template,
 )
-from visa_mcp.registry import validate_instrument_file
+from lab_visa_mcp.registry import validate_instrument_file
 
 ROOT = Path(__file__).parent.parent
 
@@ -32,8 +32,8 @@ ROOT = Path(__file__).parent.parent
 
 
 def test_version_v1_8_1():
-    import visa_mcp
-    assert visa_mcp.__version__.startswith("1.")
+    import lab_visa_mcp
+    assert lab_visa_mcp.__version__.startswith("1.")
 
 
 # =========================================================
@@ -42,13 +42,13 @@ def test_version_v1_8_1():
 
 
 V18_FILES_FULL = [
-    "src/visa_mcp/instrument_authoring.py",
-    "src/visa_mcp/extension_authoring.py",
-    "src/visa_mcp/cli.py",
-    "src/visa_mcp/templates/instruments/power_supply.yaml",
-    "src/visa_mcp/templates/instruments/dmm.yaml",
-    "src/visa_mcp/templates/instruments/temperature_meter.yaml",
-    "src/visa_mcp/templates/instruments/generic_scpi.yaml",
+    "src/lab_visa_mcp/instrument_authoring.py",
+    "src/lab_visa_mcp/extension_authoring.py",
+    "src/lab_visa_mcp/cli.py",
+    "src/lab_visa_mcp/templates/instruments/power_supply.yaml",
+    "src/lab_visa_mcp/templates/instruments/dmm.yaml",
+    "src/lab_visa_mcp/templates/instruments/temperature_meter.yaml",
+    "src/lab_visa_mcp/templates/instruments/generic_scpi.yaml",
     "docs/instrument_authoring.md",
     "docs/extension_authoring.md",
     "CONTRIBUTING.md",
@@ -80,7 +80,7 @@ def test_v181_multiline(rel):
 
 @pytest.mark.parametrize("cat", list(CATEGORIES))
 def test_template_files_exist(cat):
-    p = ROOT / "src" / "visa_mcp" / "templates" / "instruments" / (
+    p = ROOT / "src" / "lab_visa_mcp" / "templates" / "instruments" / (
         f"{cat}.yaml")
     assert p.exists(), f"template file missing: {p}"
 
@@ -88,7 +88,7 @@ def test_template_files_exist(cat):
 @pytest.mark.parametrize("cat", list(CATEGORIES))
 def test_template_files_yaml_parseable(cat):
     """template ファイルは placeholder 置換前でも yaml.safe_load 可"""
-    p = ROOT / "src" / "visa_mcp" / "templates" / "instruments" / (
+    p = ROOT / "src" / "lab_visa_mcp" / "templates" / "instruments" / (
         f"{cat}.yaml")
     text = p.read_text(encoding="utf-8")
     # template 内で {manufacturer} / {model} を仮値で置換
@@ -258,7 +258,7 @@ def fresh_pack(tmp_path):
 
 def _force_post_validate_failure(monkeypatch):
     """monkeypatch: 更新後 validate を失敗させて rollback を起こす"""
-    from visa_mcp import extension as _ext_module
+    from lab_visa_mcp import extension as _ext_module
 
     def fake_validate(path, strict=False):
         class _FakeRep:
@@ -272,9 +272,9 @@ def _force_post_validate_failure(monkeypatch):
         rep = _FakeRep()
         return rep
 
-    # add_instrument_to_pack 内 from visa_mcp.extension import
+    # add_instrument_to_pack 内 from lab_visa_mcp.extension import
     # validate_extension_file の参照を差し替え
-    import visa_mcp.instrument_authoring as ia_mod
+    import lab_visa_mcp.instrument_authoring as ia_mod
     # 関数内 import なので、monkeypatch は extension モジュール側を直接
     monkeypatch.setattr(
         _ext_module, "validate_extension_file", fake_validate,
@@ -286,7 +286,7 @@ def test_rollback_restores_extension_yaml(fresh_pack, monkeypatch):
     ext_yaml = fresh_pack / "extension.yaml"
     before_text = ext_yaml.read_text(encoding="utf-8")
     # 事前 validate は通る必要があるため、pass-through で 1 回目はパス
-    from visa_mcp import extension as _ext_module
+    from lab_visa_mcp import extension as _ext_module
     original = _ext_module.validate_extension_file
     call_count = {"n": 0}
 
@@ -326,7 +326,7 @@ def test_rollback_restores_registry_index(fresh_pack, monkeypatch):
     reg_index = fresh_pack / "registry_entries" / "INDEX.yaml"
     before = reg_index.read_text(encoding="utf-8") if reg_index.exists() else None
 
-    from visa_mcp import extension as _ext_module
+    from lab_visa_mcp import extension as _ext_module
     original = _ext_module.validate_extension_file
     call_count = {"n": 0}
 
@@ -355,7 +355,7 @@ def test_rollback_restores_registry_index(fresh_pack, monkeypatch):
 
 def test_rollback_removes_new_instrument_file(fresh_pack, monkeypatch):
     """rollback で新規 instrument file が削除される"""
-    from visa_mcp import extension as _ext_module
+    from lab_visa_mcp import extension as _ext_module
     original = _ext_module.validate_extension_file
     call_count = {"n": 0}
 
@@ -390,7 +390,7 @@ def test_rollback_preserves_existing_instrument_file(fresh_pack, monkeypatch):
     inst_path.write_text("original_content: keep\n", encoding="utf-8")
     original_text = inst_path.read_text(encoding="utf-8")
 
-    from visa_mcp import extension as _ext_module
+    from lab_visa_mcp import extension as _ext_module
     original = _ext_module.validate_extension_file
     call_count = {"n": 0}
 

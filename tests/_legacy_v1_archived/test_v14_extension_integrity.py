@@ -17,10 +17,10 @@ from pathlib import Path
 
 import pytest
 
-from visa_mcp import stability
-from visa_mcp.extension import validate_extension_file
-from visa_mcp.extension_install import install_definition_pack
-from visa_mcp.extension_integrity import (
+from lab_visa_mcp import stability
+from lab_visa_mcp.extension import validate_extension_file
+from lab_visa_mcp.extension_install import install_definition_pack
+from lab_visa_mcp.extension_integrity import (
     check_installed_extension, check_all_installed_extensions,
     inspect_installed_extension, uninstall_dry_run,
 )
@@ -34,8 +34,8 @@ ROOT = Path(__file__).parent.parent
 
 
 def test_version_v1_4_0():
-    import visa_mcp
-    assert visa_mcp.__version__.startswith("1.")
+    import lab_visa_mcp
+    assert lab_visa_mcp.__version__.startswith("1.")
 
 
 def test_no_new_mcp_tools_in_v1_4():
@@ -394,13 +394,13 @@ def test_validate_extension_strict_verified_with_evidence_ok(tmp_path):
 
 def test_metadata_validation_evidence_optional_defaults_empty(tmp_path):
     """metadata.validation_evidence は任意 (default {})"""
-    from visa_mcp.models.instrument_def import MetadataConfig
+    from lab_visa_mcp.models.instrument_def import MetadataConfig
     md = MetadataConfig(manufacturer="A", model="B")
     assert md.validation_evidence == {}
 
 
 def test_metadata_validation_evidence_accepts_dict():
-    from visa_mcp.models.instrument_def import MetadataConfig
+    from lab_visa_mcp.models.instrument_def import MetadataConfig
     md = MetadataConfig(
         manufacturer="A", model="B",
         validation_evidence={
@@ -423,7 +423,7 @@ def test_metadata_validation_evidence_accepts_dict():
 
 def _run_cli(*args: str, cwd: str | None = None) -> tuple[int, str, str]:
     result = subprocess.run(
-        [sys.executable, "-m", "visa_mcp.cli", *args],
+        [sys.executable, "-m", "lab_visa_mcp.cli", *args],
         capture_output=True, text=True,
         cwd=cwd or str(ROOT),
     )
@@ -475,10 +475,10 @@ def test_cli_validate_extension_strict_help():
 
 
 V14_FILES = [
-    "src/visa_mcp/extension_integrity.py",
-    "src/visa_mcp/cli.py",
-    "src/visa_mcp/extension.py",
-    "src/visa_mcp/models/instrument_def.py",
+    "src/lab_visa_mcp/extension_integrity.py",
+    "src/lab_visa_mcp/cli.py",
+    "src/lab_visa_mcp/extension.py",
+    "src/lab_visa_mcp/models/instrument_def.py",
     "docs/extension_integrity.md",
     "tests/test_v14_extension_integrity.py",
     "CHANGELOG.md",

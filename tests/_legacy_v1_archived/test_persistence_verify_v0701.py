@@ -14,14 +14,14 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 import yaml
 
-from visa_mcp.experiment_ir import CommandStep, Plan
-from visa_mcp.job import JobManager, JobStore
-from visa_mcp.job.state_machine import JobStatus, is_terminal
-from visa_mcp.models.instrument_def import (
+from lab_visa_mcp.experiment_ir import CommandStep, Plan
+from lab_visa_mcp.job import JobManager, JobStore
+from lab_visa_mcp.job.state_machine import JobStatus, is_terminal
+from lab_visa_mcp.models.instrument_def import (
     InstrumentDefinition, CommandDefinition, VerifyConfig,
 )
-from visa_mcp.session_manager import InstrumentSession
-from visa_mcp.step_executor import execute_command_step
+from lab_visa_mcp.session_manager import InstrumentSession
+from lab_visa_mcp.step_executor import execute_command_step
 
 
 YAML_PSU = """
@@ -177,7 +177,7 @@ async def test_get_last_measurement_refresh_if_stale_true(tmp_path, monkeypatch)
     visa = MagicMock()
     visa.query = AsyncMock(return_value="5.0")
     session = _psu_session("psu0")
-    from visa_mcp.state_query import query_state_item
+    from lab_visa_mcp.state_query import query_state_item
 
     item = session.definition.state_query["voltage"]
     r = await query_state_item(visa, session, "voltage", item)

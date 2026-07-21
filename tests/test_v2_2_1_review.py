@@ -13,11 +13,11 @@ import pytest
 import yaml
 
 from lab_executor.job.store import JobStore
-from visa_mcp.tools.export import _extract_result_rows
+from lab_visa_mcp.tools.export import _extract_result_rows
 
 
 REPO = Path(__file__).resolve().parent.parent
-BUILTIN = REPO / "src" / "visa_mcp" / "builtin_instruments"
+BUILTIN = REPO / "src" / "lab_visa_mcp" / "builtin_instruments"
 
 
 # ==============================================================
@@ -32,12 +32,12 @@ def test_resolver_ignores_venv_instruments_without_pyproject(
     が pyproject.toml が無い場合、resolver は dev path を無視して
     builtin に落ちる。
 
-    v2.3.1: resolver は `visa_mcp.instruments_dir` の純粋関数に切り
+    v2.3.1: resolver は `lab_visa_mcp.instruments_dir` の純粋関数に切り
     出されたので、server module 全体を import せずに直接呼べる
     (Codex v2.2.1 レビュー対応 #2)。
     """
     fake_venv_lib = tmp_path / "Lib"
-    sp = fake_venv_lib / "site-packages" / "visa_mcp"
+    sp = fake_venv_lib / "site-packages" / "lab_visa_mcp"
     sp.mkdir(parents=True)
     fake_server = sp / "server.py"
     fake_server.write_text("# fake", encoding="utf-8")
@@ -47,7 +47,7 @@ def test_resolver_ignores_venv_instruments_without_pyproject(
         "metadata: {}", encoding="utf-8")
     assert not (fake_venv_lib / "pyproject.toml").exists()
 
-    from visa_mcp.instruments_dir import resolve_instruments_dir
+    from lab_visa_mcp.instruments_dir import resolve_instruments_dir
     monkeypatch.delenv("VISA_MCP_INSTRUMENTS_DIR", raising=False)
     resolved = resolve_instruments_dir(str(fake_server))
     assert resolved != stale_instr, (
@@ -66,12 +66,12 @@ def test_resolver_uses_repo_instruments_when_pyproject_present(
     instr = fake_repo / "instruments"
     instr.mkdir()
     (instr / "custom.yaml").write_text("metadata: {}", encoding="utf-8")
-    sp = fake_repo / "src" / "visa_mcp"
+    sp = fake_repo / "src" / "lab_visa_mcp"
     sp.mkdir(parents=True)
     fake_server = sp / "server.py"
     fake_server.write_text("# fake", encoding="utf-8")
 
-    from visa_mcp.instruments_dir import resolve_instruments_dir
+    from lab_visa_mcp.instruments_dir import resolve_instruments_dir
     monkeypatch.delenv("VISA_MCP_INSTRUMENTS_DIR", raising=False)
     resolved = resolve_instruments_dir(str(fake_server))
     assert resolved == instr
@@ -109,7 +109,7 @@ def test_builtin_7563_yaml_loose_pattern_accepts_jppc():
 # ==============================================================
 
 
-def test_visa_mcp_export_skips_parsed_metadata(job_store, seed_job):
+def test_lab_visa_mcp_export_skips_parsed_metadata(job_store, seed_job):
     """v2.3.1: fixture を使い teardown で close される。"""
     job_id = "job_v2_2_1_metadata"
     seed_job(job_store, job_id)
@@ -140,6 +140,6 @@ def test_visa_mcp_export_skips_parsed_metadata(job_store, seed_job):
 
 
 def test_v2_2_1_version():
-    import visa_mcp
-    parts = visa_mcp.__version__.split(".")
+    import lab_visa_mcp
+    parts = lab_visa_mcp.__version__.split(".")
     assert tuple(int(p) for p in parts[:3]) >= (2, 2, 1)

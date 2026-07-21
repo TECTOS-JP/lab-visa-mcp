@@ -18,12 +18,12 @@ from pathlib import Path
 
 import pytest
 
-from visa_mcp import stability
-from visa_mcp.extension_install import (
+from lab_visa_mcp import stability
+from lab_visa_mcp.extension_install import (
     install_definition_pack, install_definition_pack_from_zip,
     list_installed_packs, load_overlay_registry,
 )
-from visa_mcp.extension_packaging import package_definition_pack
+from lab_visa_mcp.extension_packaging import package_definition_pack
 
 ROOT = Path(__file__).parent.parent
 
@@ -34,8 +34,8 @@ ROOT = Path(__file__).parent.parent
 
 
 def test_version_v1_6_0():
-    import visa_mcp
-    assert visa_mcp.__version__.startswith("1.")
+    import lab_visa_mcp
+    assert lab_visa_mcp.__version__.startswith("1.")
 
 
 def test_no_new_mcp_tools_in_v1_6():
@@ -329,7 +329,7 @@ def test_yaml_install_still_works(temp_env):
 
 def _run_cli(*args: str) -> tuple[int, str, str]:
     r = subprocess.run(
-        [sys.executable, "-m", "visa_mcp.cli", *args],
+        [sys.executable, "-m", "lab_visa_mcp.cli", *args],
         capture_output=True, text=True, cwd=str(ROOT),
     )
     return r.returncode, r.stdout, r.stderr
@@ -366,9 +366,9 @@ def test_cli_install_zip_routes_to_zip_handler(temp_env, tmp_path,
 
 
 V16_FILES = [
-    "src/visa_mcp/extension_install.py",
-    "src/visa_mcp/extension_packaging.py",
-    "src/visa_mcp/cli.py",
+    "src/lab_visa_mcp/extension_install.py",
+    "src/lab_visa_mcp/extension_packaging.py",
+    "src/lab_visa_mcp/cli.py",
     "docs/extension_install.md",
     "docs/extension_packaging.md",
     "tests/test_v16_zip_install.py",

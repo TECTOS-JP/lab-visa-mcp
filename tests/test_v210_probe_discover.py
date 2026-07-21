@@ -11,8 +11,8 @@ import pytest
 
 def _make_mgr():
     """VisaManager を ResourceManager モック付きで構築"""
-    with patch("visa_mcp.visa_manager._PYVISA_AVAILABLE", True):
-        from visa_mcp.visa_manager import VisaManager
+    with patch("lab_visa_mcp.visa_manager._PYVISA_AVAILABLE", True):
+        from lab_visa_mcp.visa_manager import VisaManager
         mgr = VisaManager.__new__(VisaManager)
         mgr._rm = None
         mgr._locks = {}
@@ -215,9 +215,9 @@ async def test_discover_resources_safe_default_queries():
 # ============================================================
 
 
-def test_visa_mcp_v210_version():
-    import visa_mcp
-    parts = visa_mcp.__version__.split(".")
+def test_lab_visa_mcp_v210_version():
+    import lab_visa_mcp
+    parts = lab_visa_mcp.__version__.split(".")
     assert int(parts[0]) >= 2 and int(parts[1]) >= 1
 
 

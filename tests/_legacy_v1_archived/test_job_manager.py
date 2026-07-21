@@ -6,10 +6,10 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 import yaml
 
-from visa_mcp.job import CancelMode, JobManager, JobStore
-from visa_mcp.job.state_machine import JobStatus
-from visa_mcp.models.instrument_def import InstrumentDefinition
-from visa_mcp.session_manager import InstrumentSession, SessionManager
+from lab_visa_mcp.job import CancelMode, JobManager, JobStore
+from lab_visa_mcp.job.state_machine import JobStatus
+from lab_visa_mcp.models.instrument_def import InstrumentDefinition
+from lab_visa_mcp.session_manager import InstrumentSession, SessionManager
 
 
 SAMPLE_YAML = """

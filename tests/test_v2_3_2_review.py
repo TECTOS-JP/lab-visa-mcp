@@ -13,7 +13,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from visa_mcp.session_store import SessionStore
+from lab_visa_mcp.session_store import SessionStore
 
 
 @pytest.fixture
@@ -44,7 +44,7 @@ def test_reload_in_memory_sessions_preserves_store(
 ):
     """reload_in_memory_sessions() は in-memory を捨てて store から
     restore し直す。store の record は消えない。"""
-    from visa_mcp.session_manager import SessionManager
+    from lab_visa_mcp.session_manager import SessionManager
     store = SessionStore(tmp_path / "sessions.json")
     sm = SessionManager(fake_visa, fake_registry, store=store)
     sm.bind_manually("GPIB0::2::INSTR", "Yokogawa", "7563")
@@ -59,7 +59,7 @@ def test_reload_in_memory_sessions_preserves_store(
 def test_clear_in_memory_does_not_touch_store(
     tmp_path, fake_registry, fake_visa
 ):
-    from visa_mcp.session_manager import SessionManager
+    from lab_visa_mcp.session_manager import SessionManager
     store = SessionStore(tmp_path / "sessions.json")
     sm = SessionManager(fake_visa, fake_registry, store=store)
     sm.bind_manually("X", "Yokogawa", "7563")
@@ -74,7 +74,7 @@ def test_clear_all_still_clears_store(
     tmp_path, fake_registry, fake_visa
 ):
     """v2.3.2 でも clear_all は明示的に store も消す (admin 用)。"""
-    from visa_mcp.session_manager import SessionManager
+    from lab_visa_mcp.session_manager import SessionManager
     store = SessionStore(tmp_path / "sessions.json")
     sm = SessionManager(fake_visa, fake_registry, store=store)
     sm.bind_manually("X", "Yokogawa", "7563")
@@ -92,7 +92,7 @@ def test_clear_persisted_binding_returns_removed_when_only_in_store(
 ):
     """definition 不在で restore skip された (in-memory 不在、store
     のみ存在) record を clear したとき、removed=true を返すこと。"""
-    from visa_mcp.session_manager import SessionManager
+    from lab_visa_mcp.session_manager import SessionManager
     store_path = tmp_path / "sessions.json"
     store = SessionStore(store_path)
     # 事前に store に push
@@ -165,6 +165,6 @@ def test_remove_re_reads_from_disk(tmp_path):
 
 
 def test_v2_3_2_version():
-    import visa_mcp
-    parts = visa_mcp.__version__.split(".")
+    import lab_visa_mcp
+    parts = lab_visa_mcp.__version__.split(".")
     assert tuple(int(p) for p in parts[:3]) >= (2, 3, 2)

@@ -7,15 +7,15 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 import yaml
 
-from visa_mcp.job import JobManager, JobStore
-from visa_mcp.job.state_machine import JobStatus
-from visa_mcp.models.instrument_def import InstrumentDefinition
-from visa_mcp.session_manager import InstrumentSession
-from visa_mcp.system_config import SystemConfig, InstrumentBinding
-from visa_mcp.testing.benchmark_task import (
+from lab_visa_mcp.job import JobManager, JobStore
+from lab_visa_mcp.job.state_machine import JobStatus
+from lab_visa_mcp.models.instrument_def import InstrumentDefinition
+from lab_visa_mcp.session_manager import InstrumentSession
+from lab_visa_mcp.system_config import SystemConfig, InstrumentBinding
+from lab_visa_mcp.testing.benchmark_task import (
     BenchmarkTask, ExpectedFailure, ExpectedRepair, load_benchmark_task,
 )
-from visa_mcp.testing.benchmark_runner import run_task_file
+from lab_visa_mcp.testing.benchmark_runner import run_task_file
 
 ROOT = Path(__file__).parent.parent
 
@@ -192,7 +192,7 @@ async def test_get_experiment_results_returns_paginated_rows(tmp_path, monkeypat
     sm, mgr, store = _setup_with_job(tmp_path)
     try:
         from fastmcp import FastMCP
-        from visa_mcp.tools.export import register_tools
+        from lab_visa_mcp.tools.export import register_tools
         mcp = FastMCP("t")
         register_tools(mcp, mgr)
         tool = await mcp.get_tool("get_experiment_results")
@@ -219,7 +219,7 @@ async def test_get_experiment_results_excludes_monitor_data_by_default(
     sm, mgr, store = _setup_with_job(tmp_path)
     try:
         from fastmcp import FastMCP
-        from visa_mcp.tools.export import register_tools
+        from lab_visa_mcp.tools.export import register_tools
         mcp = FastMCP("t")
         register_tools(mcp, mgr)
         tool = await mcp.get_tool("get_experiment_results")
@@ -250,13 +250,13 @@ async def test_export_csv_creates_file(tmp_path, monkeypatch):
     monkeypatch.setenv("VISA_MCP_SAFETY_MODE", "permissive")
     # default export dir を tmp に向ける
     monkeypatch.setattr(
-        "visa_mcp.tools.export.DEFAULT_EXPORT_DIR",
+        "lab_visa_mcp.tools.export.DEFAULT_EXPORT_DIR",
         tmp_path / "exports",
     )
     sm, mgr, store = _setup_with_job(tmp_path)
     try:
         from fastmcp import FastMCP
-        from visa_mcp.tools.export import register_tools
+        from lab_visa_mcp.tools.export import register_tools
         mcp = FastMCP("t")
         register_tools(mcp, mgr)
         tool = await mcp.get_tool("export_experiment_results")
@@ -277,13 +277,13 @@ async def test_export_csv_creates_file(tmp_path, monkeypatch):
 async def test_export_jsonl(tmp_path, monkeypatch):
     monkeypatch.setenv("VISA_MCP_SAFETY_MODE", "permissive")
     monkeypatch.setattr(
-        "visa_mcp.tools.export.DEFAULT_EXPORT_DIR",
+        "lab_visa_mcp.tools.export.DEFAULT_EXPORT_DIR",
         tmp_path / "exports",
     )
     sm, mgr, store = _setup_with_job(tmp_path)
     try:
         from fastmcp import FastMCP
-        from visa_mcp.tools.export import register_tools
+        from lab_visa_mcp.tools.export import register_tools
         mcp = FastMCP("t")
         register_tools(mcp, mgr)
         tool = await mcp.get_tool("export_experiment_results")
@@ -304,13 +304,13 @@ async def test_export_rejects_path_traversal(tmp_path, monkeypatch):
     """**重要**: ../ を含む output_path / 絶対パス to other dir を拒否"""
     monkeypatch.setenv("VISA_MCP_SAFETY_MODE", "permissive")
     monkeypatch.setattr(
-        "visa_mcp.tools.export.DEFAULT_EXPORT_DIR",
+        "lab_visa_mcp.tools.export.DEFAULT_EXPORT_DIR",
         tmp_path / "exports",
     )
     sm, mgr, store = _setup_with_job(tmp_path)
     try:
         from fastmcp import FastMCP
-        from visa_mcp.tools.export import register_tools
+        from lab_visa_mcp.tools.export import register_tools
         mcp = FastMCP("t")
         register_tools(mcp, mgr)
         tool = await mcp.get_tool("export_experiment_results")
@@ -339,13 +339,13 @@ async def test_export_rejects_path_traversal(tmp_path, monkeypatch):
 async def test_export_rejects_existing_without_overwrite(tmp_path, monkeypatch):
     monkeypatch.setenv("VISA_MCP_SAFETY_MODE", "permissive")
     monkeypatch.setattr(
-        "visa_mcp.tools.export.DEFAULT_EXPORT_DIR",
+        "lab_visa_mcp.tools.export.DEFAULT_EXPORT_DIR",
         tmp_path / "exports",
     )
     sm, mgr, store = _setup_with_job(tmp_path)
     try:
         from fastmcp import FastMCP
-        from visa_mcp.tools.export import register_tools
+        from lab_visa_mcp.tools.export import register_tools
         mcp = FastMCP("t")
         register_tools(mcp, mgr)
         tool = await mcp.get_tool("export_experiment_results")
@@ -373,13 +373,13 @@ async def test_export_rejects_existing_without_overwrite(tmp_path, monkeypatch):
 async def test_export_returns_sha256(tmp_path, monkeypatch):
     monkeypatch.setenv("VISA_MCP_SAFETY_MODE", "permissive")
     monkeypatch.setattr(
-        "visa_mcp.tools.export.DEFAULT_EXPORT_DIR",
+        "lab_visa_mcp.tools.export.DEFAULT_EXPORT_DIR",
         tmp_path / "exports",
     )
     sm, mgr, store = _setup_with_job(tmp_path)
     try:
         from fastmcp import FastMCP
-        from visa_mcp.tools.export import register_tools
+        from lab_visa_mcp.tools.export import register_tools
         mcp = FastMCP("t")
         register_tools(mcp, mgr)
         tool = await mcp.get_tool("export_experiment_results")
@@ -398,13 +398,13 @@ async def test_export_returns_sha256(tmp_path, monkeypatch):
 async def test_export_unsupported_format(tmp_path, monkeypatch):
     monkeypatch.setenv("VISA_MCP_SAFETY_MODE", "permissive")
     monkeypatch.setattr(
-        "visa_mcp.tools.export.DEFAULT_EXPORT_DIR",
+        "lab_visa_mcp.tools.export.DEFAULT_EXPORT_DIR",
         tmp_path / "exports",
     )
     sm, mgr, store = _setup_with_job(tmp_path)
     try:
         from fastmcp import FastMCP
-        from visa_mcp.tools.export import register_tools
+        from lab_visa_mcp.tools.export import register_tools
         mcp = FastMCP("t")
         register_tools(mcp, mgr)
         tool = await mcp.get_tool("export_experiment_results")
@@ -426,7 +426,7 @@ async def test_get_experiment_results_not_found(tmp_path, monkeypatch):
     sm, mgr, store = _setup_with_job(tmp_path)
     try:
         from fastmcp import FastMCP
-        from visa_mcp.tools.export import register_tools
+        from lab_visa_mcp.tools.export import register_tools
         mcp = FastMCP("t")
         register_tools(mcp, mgr)
         tool = await mcp.get_tool("get_experiment_results")

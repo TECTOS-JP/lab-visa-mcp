@@ -9,11 +9,11 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 import yaml
 
-from visa_mcp.job import JobManager, JobStore
-from visa_mcp.job.state_machine import JobStatus
-from visa_mcp.models.instrument_def import InstrumentDefinition
-from visa_mcp.session_manager import InstrumentSession
-from visa_mcp.system_config import SystemConfig, InstrumentBinding
+from lab_visa_mcp.job import JobManager, JobStore
+from lab_visa_mcp.job.state_machine import JobStatus
+from lab_visa_mcp.models.instrument_def import InstrumentDefinition
+from lab_visa_mcp.session_manager import InstrumentSession
+from lab_visa_mcp.system_config import SystemConfig, InstrumentBinding
 
 
 ROOT = Path(__file__).parent.parent
@@ -24,9 +24,9 @@ ROOT = Path(__file__).parent.parent
 # =========================================================
 
 
-def test_visa_mcp_package_version_is_v1():
-    import visa_mcp
-    assert visa_mcp.__version__.startswith("1.")
+def test_lab_visa_mcp_package_version_is_v1():
+    import lab_visa_mcp
+    assert lab_visa_mcp.__version__.startswith("1.")
 
 
 def test_pyproject_version_is_v1():
@@ -143,13 +143,13 @@ def _setup_with_job(tmp_path):
 async def test_export_bundle_creates_zip_with_manifest(tmp_path, monkeypatch):
     monkeypatch.setenv("VISA_MCP_SAFETY_MODE", "permissive")
     monkeypatch.setattr(
-        "visa_mcp.tools.export.DEFAULT_EXPORT_DIR",
+        "lab_visa_mcp.tools.export.DEFAULT_EXPORT_DIR",
         tmp_path / "exports",
     )
     sm, mgr, store = _setup_with_job(tmp_path)
     try:
         from fastmcp import FastMCP
-        from visa_mcp.tools.export import register_tools
+        from lab_visa_mcp.tools.export import register_tools
         mcp = FastMCP("t")
         register_tools(mcp, mgr)
         tool = await mcp.get_tool("export_experiment_bundle")
@@ -182,13 +182,13 @@ async def test_export_bundle_creates_zip_with_manifest(tmp_path, monkeypatch):
 async def test_export_bundle_writes_consistent_sha256(tmp_path, monkeypatch):
     monkeypatch.setenv("VISA_MCP_SAFETY_MODE", "permissive")
     monkeypatch.setattr(
-        "visa_mcp.tools.export.DEFAULT_EXPORT_DIR",
+        "lab_visa_mcp.tools.export.DEFAULT_EXPORT_DIR",
         tmp_path / "exports",
     )
     sm, mgr, store = _setup_with_job(tmp_path)
     try:
         from fastmcp import FastMCP
-        from visa_mcp.tools.export import register_tools
+        from lab_visa_mcp.tools.export import register_tools
         mcp = FastMCP("t")
         register_tools(mcp, mgr)
         tool = await mcp.get_tool("export_experiment_bundle")
@@ -212,13 +212,13 @@ async def test_export_bundle_writes_consistent_sha256(tmp_path, monkeypatch):
 async def test_export_bundle_rejects_path_traversal(tmp_path, monkeypatch):
     monkeypatch.setenv("VISA_MCP_SAFETY_MODE", "permissive")
     monkeypatch.setattr(
-        "visa_mcp.tools.export.DEFAULT_EXPORT_DIR",
+        "lab_visa_mcp.tools.export.DEFAULT_EXPORT_DIR",
         tmp_path / "exports",
     )
     sm, mgr, store = _setup_with_job(tmp_path)
     try:
         from fastmcp import FastMCP
-        from visa_mcp.tools.export import register_tools
+        from lab_visa_mcp.tools.export import register_tools
         mcp = FastMCP("t")
         register_tools(mcp, mgr)
         tool = await mcp.get_tool("export_experiment_bundle")
@@ -239,13 +239,13 @@ async def test_export_bundle_rejects_existing_without_overwrite(
 ):
     monkeypatch.setenv("VISA_MCP_SAFETY_MODE", "permissive")
     monkeypatch.setattr(
-        "visa_mcp.tools.export.DEFAULT_EXPORT_DIR",
+        "lab_visa_mcp.tools.export.DEFAULT_EXPORT_DIR",
         tmp_path / "exports",
     )
     sm, mgr, store = _setup_with_job(tmp_path)
     try:
         from fastmcp import FastMCP
-        from visa_mcp.tools.export import register_tools
+        from lab_visa_mcp.tools.export import register_tools
         mcp = FastMCP("t")
         register_tools(mcp, mgr)
         tool = await mcp.get_tool("export_experiment_bundle")

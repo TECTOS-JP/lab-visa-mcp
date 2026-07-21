@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from visa_mcp import stability
-from visa_mcp.extension_packaging import (
+from lab_visa_mcp import stability
+from lab_visa_mcp.extension_packaging import (
     package_definition_pack, verify_extension_package,
     PACKAGE_FORMAT, PACKAGE_FORMAT_VERSION, PACKAGE_SUFFIX,
 )
@@ -24,8 +24,8 @@ ROOT = Path(__file__).parent.parent
 
 
 def test_version_v1_5_0():
-    import visa_mcp
-    assert visa_mcp.__version__.startswith("1.")
+    import lab_visa_mcp
+    assert lab_visa_mcp.__version__.startswith("1.")
 
 
 def test_no_new_mcp_tools_in_v1_5():
@@ -404,7 +404,7 @@ def test_extension_verify_package_rejects_executable_true(temp_pack,
 
 def _run_cli(*args: str) -> tuple[int, str, str]:
     result = subprocess.run(
-        [sys.executable, "-m", "visa_mcp.cli", *args],
+        [sys.executable, "-m", "lab_visa_mcp.cli", *args],
         capture_output=True, text=True, cwd=str(ROOT),
     )
     return result.returncode, result.stdout, result.stderr
@@ -456,8 +456,8 @@ def test_cli_extension_verify_package_runs(temp_pack):
 
 
 V15_FILES = [
-    "src/visa_mcp/extension_packaging.py",
-    "src/visa_mcp/cli.py",
+    "src/lab_visa_mcp/extension_packaging.py",
+    "src/lab_visa_mcp/cli.py",
     "docs/extension_packaging.md",
     "docs/extension_publishing_checklist.md",
     "tests/test_v15_extension_packaging.py",

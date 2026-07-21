@@ -1,6 +1,6 @@
 """v0.6.0: Group / Map MVP テスト
 
-実装方針 (visa_mcp_v0.6.0の実装方針.md) の必須テスト 3 件:
+実装方針 (lab_visa_mcp_v0.6.0の実装方針.md) の必須テスト 3 件:
 - test_resource_lock_prevents_shared_resource_targets_from_overlapping
 - test_bus_semaphore_gpib_max_concurrency_1
 - test_map_recipe_partial_failure_continue
@@ -15,19 +15,19 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 import yaml
 
-from visa_mcp.bus_manager import BusManager
-from visa_mcp.group import (
+from lab_visa_mcp.bus_manager import BusManager
+from lab_visa_mcp.group import (
     FailurePolicy, TargetExecution,
     resolve_resource, resolve_unit_bindings, collect_target_resources,
     ResolveError,
 )
-from visa_mcp.group.executor import GroupExecutor
-from visa_mcp.experiment_ir import CommandStep, Plan
-from visa_mcp.job import JobManager, JobStore
-from visa_mcp.job.state_machine import JobStatus, is_terminal
-from visa_mcp.models.instrument_def import InstrumentDefinition
-from visa_mcp.session_manager import InstrumentSession
-from visa_mcp.system_config import (
+from lab_visa_mcp.group.executor import GroupExecutor
+from lab_visa_mcp.experiment_ir import CommandStep, Plan
+from lab_visa_mcp.job import JobManager, JobStore
+from lab_visa_mcp.job.state_machine import JobStatus, is_terminal
+from lab_visa_mcp.models.instrument_def import InstrumentDefinition
+from lab_visa_mcp.session_manager import InstrumentSession
+from lab_visa_mcp.system_config import (
     SystemConfig, InstrumentBinding, BusConfig,
     InstrumentGroup, ExperimentUnit,
 )
@@ -232,7 +232,7 @@ async def test_group_executor_all_success():
 @pytest.mark.asyncio
 async def test_group_executor_partial_failure_continue():
     """実装方針必須テスト: 一部 timeout でも partial_failure で成功分を返す"""
-    from visa_mcp.visa_manager import VisaError
+    from lab_visa_mcp.visa_manager import VisaError
 
     visa = MagicMock()
 
@@ -270,7 +270,7 @@ async def test_group_executor_partial_failure_continue():
 
 @pytest.mark.asyncio
 async def test_group_executor_stop_on_first_error():
-    from visa_mcp.visa_manager import VisaError
+    from lab_visa_mcp.visa_manager import VisaError
     visa = MagicMock()
 
     async def q(res, *args, **kwargs):
@@ -304,7 +304,7 @@ async def test_group_executor_retry_target():
     """failure_policy.retry で target 全体 retry"""
     visa = MagicMock()
     calls = {"n": 0}
-    from visa_mcp.visa_manager import VisaError
+    from lab_visa_mcp.visa_manager import VisaError
 
     async def q(*a, **kw):
         calls["n"] += 1

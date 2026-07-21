@@ -15,11 +15,11 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 import yaml
 
-from visa_mcp.job import JobManager, JobStore
-from visa_mcp.job.state_machine import JobStatus
-from visa_mcp.models.instrument_def import InstrumentDefinition
-from visa_mcp.session_manager import InstrumentSession
-from visa_mcp.system_config import SystemConfig, InstrumentBinding
+from lab_visa_mcp.job import JobManager, JobStore
+from lab_visa_mcp.job.state_machine import JobStatus
+from lab_visa_mcp.models.instrument_def import InstrumentDefinition
+from lab_visa_mcp.session_manager import InstrumentSession
+from lab_visa_mcp.system_config import SystemConfig, InstrumentBinding
 
 
 ROOT = Path(__file__).parent.parent
@@ -32,8 +32,8 @@ ROOT = Path(__file__).parent.parent
 
 def test_version_v1_1_1():
     """v1.1.1 で導入。v1.1+ の v1.x 系列であれば許容"""
-    import visa_mcp
-    assert visa_mcp.__version__.startswith("1.")
+    import lab_visa_mcp
+    assert lab_visa_mcp.__version__.startswith("1.")
 
 
 # =========================================================
@@ -46,10 +46,10 @@ REPO_TEXT_TARGETS_V111 = [
     "docs/backend_abstraction.md",
     "docs/bundle_export.md",
     "docs/v1_stability_policy.md",
-    "src/visa_mcp/backends/base.py",
-    "src/visa_mcp/backends/__init__.py",
-    "src/visa_mcp/stability.py",
-    "src/visa_mcp/tools/export.py",
+    "src/lab_visa_mcp/backends/base.py",
+    "src/lab_visa_mcp/backends/__init__.py",
+    "src/lab_visa_mcp/stability.py",
+    "src/lab_visa_mcp/tools/export.py",
     "tests/test_v11.py",
     "tests/test_v111_review.py",
 ]
@@ -183,13 +183,13 @@ def _setup(tmp_path):
 async def test_inspect_bundle_returns_compatibility(tmp_path, monkeypatch):
     monkeypatch.setenv("VISA_MCP_SAFETY_MODE", "permissive")
     monkeypatch.setattr(
-        "visa_mcp.tools.export.DEFAULT_EXPORT_DIR",
+        "lab_visa_mcp.tools.export.DEFAULT_EXPORT_DIR",
         tmp_path / "exports",
     )
     mgr, store = _setup(tmp_path)
     try:
         from fastmcp import FastMCP
-        from visa_mcp.tools.export import register_tools
+        from lab_visa_mcp.tools.export import register_tools
         mcp = FastMCP("t")
         register_tools(mcp, mgr)
         export_tool = await mcp.get_tool("export_experiment_bundle")

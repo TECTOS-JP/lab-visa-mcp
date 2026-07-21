@@ -61,5 +61,5 @@ jobs:
       - name: Install wheel + import
         run: |
           python -m pip install dist/*.whl
-          python -c "import visa_mcp; print('visa-mcp:', visa_mcp.__version__)"
-          python -c "from visa_mcp.discovery import make_backend; print(make_backend().prefixes)"
+          python -c "import lab_visa_mcp; print('lab-visa-mcp:', lab_visa_mcp.__version__)"
+          python -c "from lab_visa_mcp.discovery import make_backend; print(make_backend().prefixes)"
