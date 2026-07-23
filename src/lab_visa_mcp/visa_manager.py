@@ -67,8 +67,34 @@ class VisaManager:
         return self._rm
 
     async def _run(self, func, *args, **kwargs):
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, partial(func, *args, **kwargs))
+        """VISA I/O をワーカースレッドで実行し、**取り消されても実 I/O の完了を待つ**。
+
+        呼び出し側は ``async with self._get_lock(resource)`` の内側でこれを
+        await する。単純に await すると、取り消し時に ``CancelledError`` が
+        そのまま伝播して ``async with`` がロックを解放してしまう。しかし
+        ワーカースレッドは停止できないため、実際の VISA 通信は続いている。
+        その隙に次のコマンドや安全停止命令が同じ機器へ二重に流れ得る。
+
+        そこで future を shield し、取り消し時は実 I/O が終わるまで待って
+        から ``CancelledError`` を送出する。ロックは実通信の終了後に解放され、
+        同一機器への通信は常に直列化される。取り消しの応答は実 I/O 完了まで
+        待たされるが、機器への二重アクセスより待ち時間の方が安全である。
+        """
+        loop = asyncio.get_running_loop()
+        future = loop.run_in_executor(None, partial(func, *args, **kwargs))
+        try:
+            return await asyncio.shield(future)
+        except asyncio.CancelledError:
+            # スレッドはまだ機器を触っている。完了するまで抜けない。
+            # 排出中にさらに取り消されても待ち続ける (done を唯一の脱出条件)。
+            while not future.done():
+                try:
+                    await asyncio.shield(future)
+                except asyncio.CancelledError:
+                    continue
+                except BaseException:
+                    break
+            raise
 
     def backend_info(self) -> dict:
         """v2.4.0: 現在の VISA backend 情報を返す (診断用)。
