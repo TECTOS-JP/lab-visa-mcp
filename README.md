@@ -3,8 +3,8 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 
-**PyVISA backend + compatibility shim for
-[`lab-executor-mcp`](https://github.com/TECTOS-JP/lab-executor-mcp).**
+**[`lab-executor-mcp`](https://github.com/TECTOS-JP/lab-executor-mcp)
+用の PyVISA backend + 互換 shim です。**
 
 > **⚠ v2.8.0 で改名しました**
 > エコシステムの他 backend (`lab-modbus-mcp` / `lab-ble-mcp` /
@@ -23,11 +23,11 @@
 > pip install lab-visa-mcp
 > ```
 
-> **Line-ending note** (v2.0.1):
-> GitHub raw view が一部 viewer で file を「1 line」と mis-report する
+> **改行コードに関する注意** (v2.0.1):
+> GitHub raw view では、一部の viewer が file を「1 line」と誤って報告する
 > ことがあります。`.gitattributes` で LF を強制しており、CI で TOML /
 > YAML parse + `compileall` + multiline guard を常時検証しています。
-> 実体確認は clean clone (`git clone --branch v2.0.0` 等) または GitHub
+> 実体の確認には clean clone (`git clone --branch v2.0.0` 等) または GitHub
 > file viewer を使ってください。
 
 > **v2.0 で分離されました**
@@ -41,7 +41,7 @@
 >   `pip install lab-executor-mcp`
 > - **v1.x からの移行**: [`docs/v2_migration.md`](docs/v2_migration.md)
 
-**MCP server for controlling GPIB / USB / Serial / LAN instruments via PyVISA.**
+**PyVISA 経由で GPIB / USB / Serial / LAN 計測器を制御する MCP server です。**
 
 LLM（Claude Code / Claude Desktop など MCP 対応クライアント）から、SCPI 計測器と非 SCPI 計測器の両方を統一的に操作できるサーバーです。マニュアルから抽出したコマンドを YAML で定義すれば、機器固有の知識なしに自然言語で計測を自動化できます。
 
@@ -108,7 +108,7 @@ Claude に話しかける：
 >
 > 「USB0::0x... を identify_instrument で識別して、5V 出力するように設定してください」
 
-> **v1.1 stability**: Stable 43 tools (v1.x 互換保証) + Experimental 7 tools
+> **v1.1 の安定性**: Stable 43 tools (v1.x 互換保証) + Experimental 7 tools
 > (うち `validate_experiment_bundle` / `inspect_experiment_bundle` は v1.1 新規)。
 > raw 系 2 tools は別途オプトイン (`VISA_MCP_ENABLE_RAW_COMMANDS=1`)。
 > 詳細は [`docs/v1_stability_policy.md`](docs/v1_stability_policy.md) +
@@ -116,7 +116,7 @@ Claude に話しかける：
 > [`docs/backend_abstraction.md`](docs/backend_abstraction.md)、
 > 単一 source は `src/lab_visa_mcp/stability.py`。
 
-## Resource discovery with query filters (v2.1+)
+## query filter による resource 検出 (v2.1+)
 
 `list_resources` は `query` 引数で interface 別の絞り込みに対応:
 
@@ -327,8 +327,8 @@ MIT License — 詳細は [LICENSE](LICENSE) を参照。
 - **電源 / 高電圧機器を扱う場合は安全保護機能（OVP / OCP 等）を必ず設定してから出力 ON してください**。本ソフトウェアは安全機能の代替ではありません。
 - LLM が誤ったコマンドを送信する可能性があります。**接続機器・配線・被測定物の安全範囲は人間が責任を持って確認してください**。
 
-## Acknowledgments
+## 謝辞
 
-- [PyVISA](https://github.com/pyvisa/pyvisa) — Python VISA wrapper
+- [PyVISA](https://github.com/pyvisa/pyvisa) — Python 用 VISA wrapper
 - [FastMCP](https://github.com/jlowin/fastmcp) — MCP server framework
-- [Model Context Protocol](https://modelcontextprotocol.io/) — Anthropic
+- [Model Context Protocol](https://modelcontextprotocol.io/) — Anthropic によるプロトコル
